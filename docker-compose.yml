@@ -1,7 +1,7 @@
 services:
   postgres:
     image: postgres:17-alpine
-    container_name: fmc-postgres
+    container_name: fmu-postgres
     restart: unless-stopped
 
     environment:
@@ -10,13 +10,13 @@ services:
       POSTGRES_DB: ${DB_NAME}
 
     ports:
-      - "${DB_PORT}:5432"
+      - "5432:5432"
 
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -26,7 +26,7 @@ services:
 
   pgadmin:
     image: dpage/pgadmin4:latest
-    container_name: fmc-pgadmin
+    container_name: fmu-pgadmin
     restart: unless-stopped
 
     environment:
@@ -34,7 +34,7 @@ services:
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
 
     ports:
-      - "${PGADMIN_PORT}:80"
+      - "5050:80"
 
     volumes:
       - pgadmin_data:/var/lib/pgadmin
