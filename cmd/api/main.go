@@ -4,11 +4,14 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/joho/godotenv"
 
 	"fmu-backend/internal/auth"
 	"fmu-backend/internal/config"
 	"fmu-backend/internal/database"
+	"fmu-backend/internal/oauth"
+	"fmu-backend/internal/token"
 	"fmu-backend/internal/user"
 )
 
@@ -29,18 +32,18 @@ func main() {
 
 	userRepo := user.NewUserRepository(db)
 	userSvc := user.NewUserService(userRepo)
-	authSvc := auth.NewAuthService(userSvc)
+	tokenRepo := token.NewTokenRepository(db)
+	tokenSvc := token.NewTokenService(tokenRepo, cfg)
+	oauthSvc := oauth.NewOAuthService(cfg)
+	authSvc := auth.NewAuthService(cfg, userSvc, tokenSvc, oauthSvc)
 	authHandler := auth.NewAuthHandler(authSvc)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-	mux.HandleFunc("POST /api/v1/auth/register", authHandler.Register)
+	r := chi.NewRouter()
+	auth.RegisterRoutes(r, authHandler)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,
-		Handler: mux,
+		Handler: r,
 	}
 
 	log.Println("server running on port", cfg.Port)
