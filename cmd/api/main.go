@@ -12,6 +12,7 @@ import (
 	"fmu-backend/internal/database"
 	"fmu-backend/internal/oauth"
 	"fmu-backend/internal/token"
+	"fmu-backend/internal/university"
 	"fmu-backend/internal/user"
 )
 
@@ -38,8 +39,13 @@ func main() {
 	authSvc := auth.NewAuthService(cfg, userSvc, tokenSvc, oauthSvc)
 	authHandler := auth.NewAuthHandler(authSvc)
 
+	universityRepo := university.NewUniversityRepository(db)
+	universitySvc := university.NewUniversityService(universityRepo)
+	universityHandler := university.NewUniversityHandler(universitySvc)
+
 	r := chi.NewRouter()
 	auth.RegisterRoutes(r, authHandler)
+	university.RegisterRoutes(r, universityHandler)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,
