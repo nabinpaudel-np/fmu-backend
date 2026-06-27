@@ -1,4 +1,3 @@
--- migrate:up
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     full_name VARCHAR(255) NOT NULL,
@@ -14,7 +13,3 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_oauth_provider ON users(oauth_provider);
-
--- migrate:down
-DROP TABLE IF EXISTS users;
-
