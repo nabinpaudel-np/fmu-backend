@@ -9,7 +9,8 @@ import (
 
 	"fmu-backend/internal/auth"
 	"fmu-backend/internal/config"
-	"fmu-backend/internal/database"
+	"fmu-backend/internal/db"
+	"fmu-backend/internal/db/sqlc"
 	"fmu-backend/internal/oauth"
 	"fmu-backend/internal/token"
 	"fmu-backend/internal/university"
@@ -24,22 +25,24 @@ func main() {
 		log.Fatal(err)
 	}
 
-	db, err := database.NewPostgres(cfg)
+	pool, err := db.NewPostgres(cfg)
 	if err != nil {
 		log.Fatal(err)
 	}
 	log.Println("postgresql database connected successfully")
-	defer db.Close()
+	defer pool.Close()
 
-	userRepo := user.NewUserRepository(db)
+	queries := sqlc.New(pool)
+
+	userRepo := user.NewUserRepository(queries)
 	userSvc := user.NewUserService(userRepo)
-	tokenRepo := token.NewTokenRepository(db)
+	tokenRepo := token.NewTokenRepository(pool)
 	tokenSvc := token.NewTokenService(tokenRepo, cfg)
 	oauthSvc := oauth.NewOAuthService(cfg)
 	authSvc := auth.NewAuthService(cfg, userSvc, tokenSvc, oauthSvc)
 	authHandler := auth.NewAuthHandler(authSvc)
 
-	universityRepo := university.NewUniversityRepository(db)
+	universityRepo := university.NewUniversityRepository(pool)
 	universitySvc := university.NewUniversityService(universityRepo)
 	universityHandler := university.NewUniversityHandler(universitySvc)
 
