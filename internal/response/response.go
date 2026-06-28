@@ -6,14 +6,17 @@ import (
 )
 
 type ErrorDetail struct {
-	Field   string `json:"field"`
-	Message string `json:"message"`
+	Field   string `json:"field" example:"email"`
+	Message string `json:"message" example:"email is required"`
 }
 
+// APIResponse is the standard envelope used by every endpoint. Successful
+// responses carry the payload under `data`; failed responses carry either an
+// `error` string or a list of `errors` describing per-field validation failures.
 type APIResponse struct {
-	Success bool          `json:"success"`
+	Success bool          `json:"success" example:"true"`
 	Data    any           `json:"data,omitempty"`
-	Error   string        `json:"error,omitempty"`
+	Error   string        `json:"error,omitempty" example:"something went wrong"`
 	Errors  []ErrorDetail `json:"errors,omitempty"`
 }
 
