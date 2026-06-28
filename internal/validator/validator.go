@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/google/uuid"
 )
 
 var Validate *validator.Validate
@@ -18,5 +19,10 @@ func init() {
 			return name
 		}
 		return fld.Name
+	})
+
+	Validate.RegisterValidation("uuid", func(fl validator.FieldLevel) bool {
+		_, err := uuid.Parse(fl.Field().String())
+		return err == nil
 	})
 }
