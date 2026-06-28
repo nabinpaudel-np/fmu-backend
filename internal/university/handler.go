@@ -2,9 +2,14 @@ package university
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"fmu-backend/internal/errs"
 	"fmu-backend/internal/response"
 	"fmu-backend/internal/validator"
-	"net/http"
 )
 
 type UniversityHandler struct {
@@ -15,6 +20,27 @@ func NewUniversityHandler(universityService UniversityService) *UniversityHandle
 	return &UniversityHandler{
 		universityService: universityService,
 	}
+}
+
+// resourceField maps a lookup-table name to its request-DTO field name.
+var resourceField = map[string]string{
+	"degree_levels":        "degree_level_ids",
+	"majors":               "major_ids",
+	"study_formats":        "study_format_ids",
+	"special_affiliations": "special_affiliation_ids",
+	"athletics":            "athletic_ids",
+	"support_services":     "support_service_ids",
+}
+
+// formatMissingIDs returns a human-readable list, capping at 10 IDs with
+// a "(and N more)" suffix so a payload with hundreds of bad IDs does not
+// blow up the response body.
+func formatMissingIDs(ids []string) string {
+	const cap = 10
+	if len(ids) <= cap {
+		return strings.Join(ids, ", ")
+	}
+	return strings.Join(ids[:cap], ", ") + fmt.Sprintf(" (and %d more)", len(ids)-cap)
 }
 
 func (h *UniversityHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -33,9 +59,88 @@ func (h *UniversityHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.universityService.Create(r.Context(), &req)
 	if err != nil {
+		var refErr *errs.InvalidReferencesError
+		if errors.As(err, &refErr) {
+			details := make([]response.ErrorDetail, 0, len(refErr.References))
+			for resource, ids := range refErr.References {
+				details = append(details, response.ErrorDetail{
+					Field:   resourceField[resource],
+					Message: fmt.Sprintf("the following %s do not exist: [%s]", resource, formatMissingIDs(ids)),
+				})
+			}
+			response.ValidationError(w, http.StatusBadRequest, details)
+			return
+		}
+		if errors.Is(err, errs.ErrUniversitySlugTaken) {
+			response.Error(w, http.StatusConflict, err.Error())
+			return
+		}
 		response.Error(w, http.StatusInternalServerError, "something went wrong")
 		return
 	}
 
 	response.Success(w, http.StatusCreated, res)
+}
+
+func (h *UniversityHandler) GetMajors(w http.ResponseWriter, r *http.Request) {
+	majors, err := h.universityService.GetMajors(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+	response.Success(w, http.StatusOK, majors)
+}
+
+func (h *UniversityHandler) GetDegreeLevels(w http.ResponseWriter, r *http.Request) {
+	items, err := h.universityService.GetDegreeLevels(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+	response.Success(w, http.StatusOK, items)
+}
+
+func (h *UniversityHandler) GetStudyFormats(w http.ResponseWriter, r *http.Request) {
+	items, err := h.universityService.GetStudyFormats(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+	response.Success(w, http.StatusOK, items)
+}
+
+func (h *UniversityHandler) GetSpecialAffiliations(w http.ResponseWriter, r *http.Request) {
+	items, err := h.universityService.GetSpecialAffiliations(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+	response.Success(w, http.StatusOK, items)
+}
+
+func (h *UniversityHandler) GetAthletics(w http.ResponseWriter, r *http.Request) {
+	items, err := h.universityService.GetAthletics(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+	response.Success(w, http.StatusOK, items)
+}
+
+func (h *UniversityHandler) GetSupportServices(w http.ResponseWriter, r *http.Request) {
+	items, err := h.universityService.GetSupportServices(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+	response.Success(w, http.StatusOK, items)
+}
+
+func (h *UniversityHandler) GetAllLookups(w http.ResponseWriter, r *http.Request) {
+	lookups, err := h.universityService.GetAllLookups(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+	response.Success(w, http.StatusOK, lookups)
 }

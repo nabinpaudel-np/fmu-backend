@@ -42,7 +42,7 @@ func main() {
 	authSvc := auth.NewAuthService(cfg, userSvc, tokenSvc, oauthSvc)
 	authHandler := auth.NewAuthHandler(authSvc)
 
-	universityRepo := university.NewUniversityRepository(pool)
+	universityRepo := university.NewUniversityRepository(queries, pool)
 	universitySvc := university.NewUniversityService(universityRepo)
 	universityHandler := university.NewUniversityHandler(universitySvc)
 

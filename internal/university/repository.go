@@ -2,148 +2,215 @@ package university
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"strings"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"fmu-backend/internal/db/sqlc"
+	"fmu-backend/internal/errs"
 )
 
+type lookupIDs struct {
+	DegreeLevelIDs        []string
+	MajorIDs              []string
+	StudyFormatIDs        []string
+	SpecialAffiliationIDs []string
+	AthleticIDs           []string
+	SupportServiceIDs     []string
+}
+
 type UniversityRepository interface {
-	Create(ctx context.Context, req *CreateUniversityRequest) (*University, error)
+	Create(ctx context.Context, params sqlc.CreateUniversityParams, ids lookupIDs) (sqlc.University, error)
+	GetMajors(ctx context.Context) ([]sqlc.Major, error)
+	GetDegreeLevels(ctx context.Context) ([]sqlc.DegreeLevel, error)
+	GetStudyFormats(ctx context.Context) ([]sqlc.StudyFormat, error)
+	GetSpecialAffiliations(ctx context.Context) ([]sqlc.SpecialAffiliation, error)
+	GetAthletics(ctx context.Context) ([]sqlc.Athletic, error)
+	GetSupportServices(ctx context.Context) ([]sqlc.SupportService, error)
 }
 
 type universityRepository struct {
-	db *pgxpool.Pool
+	queries *sqlc.Queries
+	pool    *pgxpool.Pool
 }
 
-func NewUniversityRepository(db *pgxpool.Pool) UniversityRepository {
-	return &universityRepository{
-		db: db,
-	}
+func NewUniversityRepository(queries *sqlc.Queries, pool *pgxpool.Pool) UniversityRepository {
+	return &universityRepository{queries: queries, pool: pool}
 }
 
-func (r *universityRepository) Create(ctx context.Context, req *CreateUniversityRequest) (*University, error) {
-	tx, err := r.db.Begin(ctx)
+func (r *universityRepository) Create(ctx context.Context, params sqlc.CreateUniversityParams, ids lookupIDs) (sqlc.University, error) {
+	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return nil, err
+		return sqlc.University{}, err
 	}
-
 	defer func() {
 		if err != nil {
 			tx.Rollback(ctx)
 		}
 	}()
 
-	var uni University
+	q := r.queries.WithTx(tx)
 
-	query := `
-	INSERT INTO universities (
-		name, slug, overview, excerpt,
-		country, state, city, full_location,
-		cover_image, logo,
-		institution_type, campus_setting,
-		in_state_tuition, out_of_state_tuition, international_tuition,
-		need_based_aid, merit_scholarships, work_study, no_application_fee,
-		acceptance_rate, testing_policy, sat_range, act_range,
-		on_campus_housing, freshmen_required_on_campus,
-		contact_email, contact_phone, website
-	)
-	VALUES (
-		$1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-		$11, $12, $13, $14, $15, $16, $17, $18, $19,
-		$20, $21, $22, $23, $24, $25, $26, $27, $28
-	)
-	RETURNING 
-		id, name, slug, overview, excerpt,
-		country, state, city, full_location,
-		cover_image, logo,
-		institution_type, campus_setting,
-		in_state_tuition, out_of_state_tuition, international_tuition,
-		need_based_aid, merit_scholarships, work_study, no_application_fee,
-		acceptance_rate, testing_policy, sat_range, act_range,
-		on_campus_housing, freshmen_required_on_campus,
-		contact_email, contact_phone, website,
-		created_at, updated_at
-	`
-
-	err = tx.QueryRow(ctx, query,
-		req.Name, req.Slug, req.Overview, req.Excerpt,
-		req.Country, req.State, req.City, req.FullLocation,
-		req.CoverImage, req.Logo,
-		req.InstitutionType, req.CampusSetting,
-		req.InStateTuition, req.OutOfStateTuition, req.InternationalTuition,
-		req.NeedBasedAid, req.MeritScholarships, req.WorkStudy, req.NoApplicationFee,
-		req.AcceptanceRate, req.TestingPolicy, req.SatRange, req.ActRange,
-		req.OnCampusHousing, req.FreshmenRequiredOnCampus,
-		req.ContactEmail, req.ContactPhone, req.Website,
-	).Scan(
-		&uni.ID, &uni.Name, &uni.Slug, &uni.Overview, &uni.Excerpt,
-		&uni.Country, &uni.State, &uni.City, &uni.FullLocation,
-		&uni.CoverImage, &uni.Logo,
-		&uni.InstitutionType, &uni.CampusSetting,
-		&uni.InStateTuition, &uni.OutOfStateTuition, &uni.InternationalTuition,
-		&uni.NeedBasedAid, &uni.MeritScholarships, &uni.WorkStudy, &uni.NoApplicationFee,
-		&uni.AcceptanceRate, &uni.TestingPolicy, &uni.SatRange, &uni.ActRange,
-		&uni.OnCampusHousing, &uni.FreshmenRequiredOnCampus,
-		&uni.ContactEmail, &uni.ContactPhone, &uni.Website,
-		&uni.CreatedAt, &uni.UpdatedAt,
-	)
+	missing, err := validateReferences(ctx, q, ids)
 	if err != nil {
-		return nil, err
+		return sqlc.University{}, err
+	}
+	if len(missing) > 0 {
+		return sqlc.University{}, &errs.InvalidReferencesError{References: missing}
 	}
 
-	insertBatch := func(table, column string, ids []string) error {
-		if len(ids) == 0 {
-			return nil
+	row, err := q.CreateUniversity(ctx, params)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return sqlc.University{}, fmt.Errorf("%w (slug=%s)", errs.ErrUniversitySlugTaken, params.Slug)
 		}
+		return sqlc.University{}, err
+	}
 
-		values := make([]string, 0, len(ids))
-		args := make([]interface{}, 0, len(ids)+1)
-		args = append(args, uni.ID)
-
-		for i, id := range ids {
-			values = append(values, fmt.Sprintf("($1, $%d)", i+2))
-			args = append(args, id)
+	if len(ids.DegreeLevelIDs) > 0 {
+		if err = q.InsertUniversityDegreeLevels(ctx, sqlc.InsertUniversityDegreeLevelsParams{
+			UniversityID: row.ID,
+			Column2:      ids.DegreeLevelIDs,
+		}); err != nil {
+			return sqlc.University{}, err
 		}
-
-		q := fmt.Sprintf(
-			"INSERT INTO %s (university_id, %s) VALUES %s",
-			table,
-			column,
-			strings.Join(values, ","),
-		)
-
-		_, err := tx.Exec(ctx, q, args...)
-		return err
 	}
-
-	if err = insertBatch("university_degree_levels", "degree_level_id", req.DegreeLevelIDs); err != nil {
-		return nil, err
+	if len(ids.MajorIDs) > 0 {
+		if err = q.InsertUniversityMajors(ctx, sqlc.InsertUniversityMajorsParams{
+			UniversityID: row.ID,
+			Column2:      ids.MajorIDs,
+		}); err != nil {
+			return sqlc.University{}, err
+		}
 	}
-
-	if err = insertBatch("university_majors", "major_id", req.MajorIDs); err != nil {
-		return nil, err
+	if len(ids.StudyFormatIDs) > 0 {
+		if err = q.InsertUniversityStudyFormats(ctx, sqlc.InsertUniversityStudyFormatsParams{
+			UniversityID: row.ID,
+			Column2:      ids.StudyFormatIDs,
+		}); err != nil {
+			return sqlc.University{}, err
+		}
 	}
-
-	if err = insertBatch("university_study_formats", "study_format_id", req.StudyFormatIDs); err != nil {
-		return nil, err
+	if len(ids.SpecialAffiliationIDs) > 0 {
+		if err = q.InsertUniversitySpecialAffiliations(ctx, sqlc.InsertUniversitySpecialAffiliationsParams{
+			UniversityID: row.ID,
+			Column2:      ids.SpecialAffiliationIDs,
+		}); err != nil {
+			return sqlc.University{}, err
+		}
 	}
-
-	if err = insertBatch("university_special_affiliations", "special_affiliation_id", req.SpecialAffiliationIDs); err != nil {
-		return nil, err
+	if len(ids.AthleticIDs) > 0 {
+		if err = q.InsertUniversityAthletics(ctx, sqlc.InsertUniversityAthleticsParams{
+			UniversityID: row.ID,
+			Column2:      ids.AthleticIDs,
+		}); err != nil {
+			return sqlc.University{}, err
+		}
 	}
-
-	if err = insertBatch("university_athletics", "athletic_id", req.AthleticIDs); err != nil {
-		return nil, err
-	}
-
-	if err = insertBatch("university_support_services", "support_service_id", req.SupportServiceIDs); err != nil {
-		return nil, err
+	if len(ids.SupportServiceIDs) > 0 {
+		if err = q.InsertUniversitySupportServices(ctx, sqlc.InsertUniversitySupportServicesParams{
+			UniversityID: row.ID,
+			Column2:      ids.SupportServiceIDs,
+		}); err != nil {
+			return sqlc.University{}, err
+		}
 	}
 
 	if err = tx.Commit(ctx); err != nil {
-		return nil, err
+		return sqlc.University{}, err
 	}
 
-	return &uni, nil
+	return row, nil
+}
+
+func (r *universityRepository) GetMajors(ctx context.Context) ([]sqlc.Major, error) {
+	return r.queries.GetMajors(ctx)
+}
+
+func (r *universityRepository) GetDegreeLevels(ctx context.Context) ([]sqlc.DegreeLevel, error) {
+	return r.queries.GetDegreeLevels(ctx)
+}
+
+func (r *universityRepository) GetStudyFormats(ctx context.Context) ([]sqlc.StudyFormat, error) {
+	return r.queries.GetStudyFormats(ctx)
+}
+
+func (r *universityRepository) GetSpecialAffiliations(ctx context.Context) ([]sqlc.SpecialAffiliation, error) {
+	return r.queries.GetSpecialAffiliations(ctx)
+}
+
+func (r *universityRepository) GetAthletics(ctx context.Context) ([]sqlc.Athletic, error) {
+	return r.queries.GetAthletics(ctx)
+}
+
+func (r *universityRepository) GetSupportServices(ctx context.Context) ([]sqlc.SupportService, error) {
+	return r.queries.GetSupportServices(ctx)
+}
+
+func validateReferences(ctx context.Context, q *sqlc.Queries, ids lookupIDs) (map[string][]string, error) {
+	var missing map[string][]string
+
+	record := func(table string, existing, requested []string) {
+		if m := findMissing(existing, requested); len(m) > 0 {
+			if missing == nil {
+				missing = make(map[string][]string)
+			}
+			missing[table] = m
+		}
+	}
+
+	existing, err := q.GetExistingDegreeLevelIDs(ctx, ids.DegreeLevelIDs)
+	if err != nil {
+		return nil, err
+	}
+	record("degree_levels", existing, ids.DegreeLevelIDs)
+
+	existing, err = q.GetExistingMajorIDs(ctx, ids.MajorIDs)
+	if err != nil {
+		return nil, err
+	}
+	record("majors", existing, ids.MajorIDs)
+
+	existing, err = q.GetExistingStudyFormatIDs(ctx, ids.StudyFormatIDs)
+	if err != nil {
+		return nil, err
+	}
+	record("study_formats", existing, ids.StudyFormatIDs)
+
+	existing, err = q.GetExistingSpecialAffiliationIDs(ctx, ids.SpecialAffiliationIDs)
+	if err != nil {
+		return nil, err
+	}
+	record("special_affiliations", existing, ids.SpecialAffiliationIDs)
+
+	existing, err = q.GetExistingAthleticIDs(ctx, ids.AthleticIDs)
+	if err != nil {
+		return nil, err
+	}
+	record("athletics", existing, ids.AthleticIDs)
+
+	existing, err = q.GetExistingSupportServiceIDs(ctx, ids.SupportServiceIDs)
+	if err != nil {
+		return nil, err
+	}
+	record("support_services", existing, ids.SupportServiceIDs)
+
+	return missing, nil
+}
+
+func findMissing(existing, requested []string) []string {
+	found := make(map[string]struct{}, len(existing))
+	for _, id := range existing {
+		found[id] = struct{}{}
+	}
+	var missing []string
+	for _, id := range requested {
+		if _, ok := found[id]; !ok {
+			missing = append(missing, id)
+		}
+	}
+	return missing
 }
