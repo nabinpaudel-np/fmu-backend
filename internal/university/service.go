@@ -6,6 +6,7 @@ import (
 	"log"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"fmu-backend/internal/errs"
 	"fmu-backend/internal/pagination"
@@ -68,6 +69,13 @@ func (s *universityService) GetByID(ctx context.Context, id string) (*University
 	row, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errs.ErrNotFound
+		}
+		// Bad UUIDs never reach the row scan — Postgres rejects the cast
+		// before the row exists, so the error is 22P02 (invalid_text_representation),
+		// not ErrNoRows. Treat both as "not found" so the handler returns 404.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "22P02" {
 			return nil, errs.ErrNotFound
 		}
 		log.Default().Printf("failed to get university %s: %v", id, err)
