@@ -11,6 +11,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countUniversities = `-- name: CountUniversities :one
+SELECT COUNT(*) FROM universities
+`
+
+func (q *Queries) CountUniversities(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countUniversities)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createUniversity = `-- name: CreateUniversity :one
 INSERT INTO universities (
     name, slug, overview, excerpt,
@@ -21,14 +32,18 @@ INSERT INTO universities (
     need_based_aid, merit_scholarships, work_study, no_application_fee,
     acceptance_rate, testing_policy, sat_range, act_range,
     on_campus_housing, freshmen_required_on_campus,
-    contact_email, contact_phone, website
+    contact_email, contact_phone, website,
+    zipcode, tuition_min, tuition_max, avg_high_school_gpa,
+    founded_year, campus_size, gallery_images,
+    is_popular, is_featured
 )
 VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
     $11, $12, $13, $14, $15, $16, $17, $18, $19,
-    $20, $21, $22, $23, $24, $25, $26, $27, $28
+    $20, $21, $22, $23, $24, $25, $26, $27, $28,
+    $29, $30, $31, $32, $33, $34, $35, $36, $37
 )
-RETURNING id, name, slug, overview, excerpt, country, state, city, full_location, cover_image, logo, institution_type, campus_setting, in_state_tuition, out_of_state_tuition, international_tuition, need_based_aid, merit_scholarships, work_study, no_application_fee, acceptance_rate, testing_policy, sat_range, act_range, on_campus_housing, freshmen_required_on_campus, contact_email, contact_phone, website, created_at, updated_at
+RETURNING id, name, slug, overview, excerpt, country, state, city, full_location, cover_image, logo, institution_type, campus_setting, in_state_tuition, out_of_state_tuition, international_tuition, need_based_aid, merit_scholarships, work_study, no_application_fee, acceptance_rate, testing_policy, sat_range, act_range, on_campus_housing, freshmen_required_on_campus, contact_email, contact_phone, website, zipcode, tuition_min, tuition_max, avg_high_school_gpa, founded_year, campus_size, gallery_images, is_popular, is_featured, created_at, updated_at
 `
 
 type CreateUniversityParams struct {
@@ -60,6 +75,15 @@ type CreateUniversityParams struct {
 	ContactEmail             *string
 	ContactPhone             *string
 	Website                  *string
+	Zipcode                  *string
+	TuitionMin               *int32
+	TuitionMax               *int32
+	AvgHighSchoolGpa         pgtype.Numeric
+	FoundedYear              *int16
+	CampusSize               *string
+	GalleryImages            []string
+	IsPopular                bool
+	IsFeatured               bool
 }
 
 func (q *Queries) CreateUniversity(ctx context.Context, arg CreateUniversityParams) (University, error) {
@@ -92,6 +116,15 @@ func (q *Queries) CreateUniversity(ctx context.Context, arg CreateUniversityPara
 		arg.ContactEmail,
 		arg.ContactPhone,
 		arg.Website,
+		arg.Zipcode,
+		arg.TuitionMin,
+		arg.TuitionMax,
+		arg.AvgHighSchoolGpa,
+		arg.FoundedYear,
+		arg.CampusSize,
+		arg.GalleryImages,
+		arg.IsPopular,
+		arg.IsFeatured,
 	)
 	var i University
 	err := row.Scan(
@@ -124,6 +157,15 @@ func (q *Queries) CreateUniversity(ctx context.Context, arg CreateUniversityPara
 		&i.ContactEmail,
 		&i.ContactPhone,
 		&i.Website,
+		&i.Zipcode,
+		&i.TuitionMin,
+		&i.TuitionMax,
+		&i.AvgHighSchoolGpa,
+		&i.FoundedYear,
+		&i.CampusSize,
+		&i.GalleryImages,
+		&i.IsPopular,
+		&i.IsFeatured,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -418,6 +460,226 @@ func (q *Queries) GetSupportServices(ctx context.Context) ([]SupportService, err
 	return items, nil
 }
 
+const getUniversityAthletics = `-- name: GetUniversityAthletics :many
+SELECT a.id, a.name
+FROM athletics a
+JOIN university_athletics ua ON a.id = ua.athletic_id
+WHERE ua.university_id = $1
+ORDER BY a.name
+`
+
+func (q *Queries) GetUniversityAthletics(ctx context.Context, universityID string) ([]Athletic, error) {
+	rows, err := q.db.Query(ctx, getUniversityAthletics, universityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Athletic{}
+	for rows.Next() {
+		var i Athletic
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getUniversityByID = `-- name: GetUniversityByID :one
+SELECT id, name, slug, overview, excerpt, country, state, city, full_location, cover_image, logo, institution_type, campus_setting, in_state_tuition, out_of_state_tuition, international_tuition, need_based_aid, merit_scholarships, work_study, no_application_fee, acceptance_rate, testing_policy, sat_range, act_range, on_campus_housing, freshmen_required_on_campus, contact_email, contact_phone, website, zipcode, tuition_min, tuition_max, avg_high_school_gpa, founded_year, campus_size, gallery_images, is_popular, is_featured, created_at, updated_at FROM universities WHERE id = $1
+`
+
+func (q *Queries) GetUniversityByID(ctx context.Context, id string) (University, error) {
+	row := q.db.QueryRow(ctx, getUniversityByID, id)
+	var i University
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.Overview,
+		&i.Excerpt,
+		&i.Country,
+		&i.State,
+		&i.City,
+		&i.FullLocation,
+		&i.CoverImage,
+		&i.Logo,
+		&i.InstitutionType,
+		&i.CampusSetting,
+		&i.InStateTuition,
+		&i.OutOfStateTuition,
+		&i.InternationalTuition,
+		&i.NeedBasedAid,
+		&i.MeritScholarships,
+		&i.WorkStudy,
+		&i.NoApplicationFee,
+		&i.AcceptanceRate,
+		&i.TestingPolicy,
+		&i.SatRange,
+		&i.ActRange,
+		&i.OnCampusHousing,
+		&i.FreshmenRequiredOnCampus,
+		&i.ContactEmail,
+		&i.ContactPhone,
+		&i.Website,
+		&i.Zipcode,
+		&i.TuitionMin,
+		&i.TuitionMax,
+		&i.AvgHighSchoolGpa,
+		&i.FoundedYear,
+		&i.CampusSize,
+		&i.GalleryImages,
+		&i.IsPopular,
+		&i.IsFeatured,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getUniversityDegreeLevels = `-- name: GetUniversityDegreeLevels :many
+SELECT dl.id, dl.name
+FROM degree_levels dl
+JOIN university_degree_levels udl ON dl.id = udl.degree_level_id
+WHERE udl.university_id = $1
+ORDER BY dl.name
+`
+
+func (q *Queries) GetUniversityDegreeLevels(ctx context.Context, universityID string) ([]DegreeLevel, error) {
+	rows, err := q.db.Query(ctx, getUniversityDegreeLevels, universityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DegreeLevel{}
+	for rows.Next() {
+		var i DegreeLevel
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getUniversityMajors = `-- name: GetUniversityMajors :many
+SELECT m.id, m.name
+FROM majors m
+JOIN university_majors um ON m.id = um.major_id
+WHERE um.university_id = $1
+ORDER BY m.name
+`
+
+func (q *Queries) GetUniversityMajors(ctx context.Context, universityID string) ([]Major, error) {
+	rows, err := q.db.Query(ctx, getUniversityMajors, universityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Major{}
+	for rows.Next() {
+		var i Major
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getUniversitySpecialAffiliations = `-- name: GetUniversitySpecialAffiliations :many
+SELECT sa.id, sa.name
+FROM special_affiliations sa
+JOIN university_special_affiliations usa ON sa.id = usa.special_affiliation_id
+WHERE usa.university_id = $1
+ORDER BY sa.name
+`
+
+func (q *Queries) GetUniversitySpecialAffiliations(ctx context.Context, universityID string) ([]SpecialAffiliation, error) {
+	rows, err := q.db.Query(ctx, getUniversitySpecialAffiliations, universityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SpecialAffiliation{}
+	for rows.Next() {
+		var i SpecialAffiliation
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getUniversityStudyFormats = `-- name: GetUniversityStudyFormats :many
+SELECT sf.id, sf.name
+FROM study_formats sf
+JOIN university_study_formats usf ON sf.id = usf.study_format_id
+WHERE usf.university_id = $1
+ORDER BY sf.name
+`
+
+func (q *Queries) GetUniversityStudyFormats(ctx context.Context, universityID string) ([]StudyFormat, error) {
+	rows, err := q.db.Query(ctx, getUniversityStudyFormats, universityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []StudyFormat{}
+	for rows.Next() {
+		var i StudyFormat
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getUniversitySupportServices = `-- name: GetUniversitySupportServices :many
+SELECT ss.id, ss.name
+FROM support_services ss
+JOIN university_support_services uss ON ss.id = uss.support_service_id
+WHERE uss.university_id = $1
+ORDER BY ss.name
+`
+
+func (q *Queries) GetUniversitySupportServices(ctx context.Context, universityID string) ([]SupportService, error) {
+	rows, err := q.db.Query(ctx, getUniversitySupportServices, universityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SupportService{}
+	for rows.Next() {
+		var i SupportService
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const insertUniversityAthletics = `-- name: InsertUniversityAthletics :exec
 INSERT INTO university_athletics (university_id, athletic_id)
 SELECT $1, unnest($2::uuid[])
@@ -512,4 +774,74 @@ type InsertUniversitySupportServicesParams struct {
 func (q *Queries) InsertUniversitySupportServices(ctx context.Context, arg InsertUniversitySupportServicesParams) error {
 	_, err := q.db.Exec(ctx, insertUniversitySupportServices, arg.UniversityID, arg.Column2)
 	return err
+}
+
+const listUniversities = `-- name: ListUniversities :many
+SELECT id, name, slug, overview, excerpt, country, state, city, full_location, cover_image, logo, institution_type, campus_setting, in_state_tuition, out_of_state_tuition, international_tuition, need_based_aid, merit_scholarships, work_study, no_application_fee, acceptance_rate, testing_policy, sat_range, act_range, on_campus_housing, freshmen_required_on_campus, contact_email, contact_phone, website, zipcode, tuition_min, tuition_max, avg_high_school_gpa, founded_year, campus_size, gallery_images, is_popular, is_featured, created_at, updated_at FROM universities ORDER BY name LIMIT $1 OFFSET $2
+`
+
+type ListUniversitiesParams struct {
+	Limit  int32
+	Offset int32
+}
+
+func (q *Queries) ListUniversities(ctx context.Context, arg ListUniversitiesParams) ([]University, error) {
+	rows, err := q.db.Query(ctx, listUniversities, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []University{}
+	for rows.Next() {
+		var i University
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Slug,
+			&i.Overview,
+			&i.Excerpt,
+			&i.Country,
+			&i.State,
+			&i.City,
+			&i.FullLocation,
+			&i.CoverImage,
+			&i.Logo,
+			&i.InstitutionType,
+			&i.CampusSetting,
+			&i.InStateTuition,
+			&i.OutOfStateTuition,
+			&i.InternationalTuition,
+			&i.NeedBasedAid,
+			&i.MeritScholarships,
+			&i.WorkStudy,
+			&i.NoApplicationFee,
+			&i.AcceptanceRate,
+			&i.TestingPolicy,
+			&i.SatRange,
+			&i.ActRange,
+			&i.OnCampusHousing,
+			&i.FreshmenRequiredOnCampus,
+			&i.ContactEmail,
+			&i.ContactPhone,
+			&i.Website,
+			&i.Zipcode,
+			&i.TuitionMin,
+			&i.TuitionMax,
+			&i.AvgHighSchoolGpa,
+			&i.FoundedYear,
+			&i.CampusSize,
+			&i.GalleryImages,
+			&i.IsPopular,
+			&i.IsFeatured,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

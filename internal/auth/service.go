@@ -37,7 +37,7 @@ func NewAuthService(cfg *config.Config, userService user.UserService, tokenServi
 }
 
 func (s *authService) Register(ctx context.Context, req *RegisterRequest) (*RegisterResponse, error) {
-	u, err := s.userService.Create(ctx, req.FullName, req.Email, req.Password, "student")
+	u, err := s.userService.Create(ctx, req.FullName, req.Email, req.Password, RoleStudent)
 	if err != nil {
 		return nil, err
 	}

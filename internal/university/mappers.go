@@ -36,6 +36,15 @@ func toCreateUniversityParams(req *CreateUniversityRequest) sqlc.CreateUniversit
 		ContactEmail:             &req.ContactEmail,
 		ContactPhone:             &req.ContactPhone,
 		Website:                  &req.Website,
+		Zipcode:                  &req.Zipcode,
+		TuitionMin:               &req.TuitionMin,
+		TuitionMax:               &req.TuitionMax,
+		AvgHighSchoolGpa:         toPgNumeric(req.AvgHighSchoolGpa),
+		FoundedYear:              toPgInt16(req.FoundedYear),
+		CampusSize:               &req.CampusSize,
+		GalleryImages:            req.GalleryImages,
+		IsPopular:                req.IsPopular,
+		IsFeatured:               req.IsFeatured,
 	}
 }
 
@@ -70,6 +79,15 @@ func toCreateUniversityResponse(u sqlc.University) *CreateUniversityResponse {
 		ContactEmail:             derefString(u.ContactEmail),
 		ContactPhone:             derefString(u.ContactPhone),
 		Website:                  derefString(u.Website),
+		Zipcode:                  derefString(u.Zipcode),
+		TuitionMin:               derefInt32(u.TuitionMin),
+		TuitionMax:               derefInt32(u.TuitionMax),
+		AvgHighSchoolGpa:         fromPgNumeric(u.AvgHighSchoolGpa),
+		FoundedYear:              derefInt16AsInt32(u.FoundedYear),
+		CampusSize:               derefString(u.CampusSize),
+		GalleryImages:            u.GalleryImages,
+		IsPopular:                u.IsPopular,
+		IsFeatured:               u.IsFeatured,
 		CreatedAt:                u.CreatedAt,
 		UpdatedAt:                u.UpdatedAt,
 	}
@@ -80,6 +98,76 @@ func derefString(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+func toUniversityListItem(u sqlc.University) UniversityListItem {
+	return UniversityListItem{
+		ID:              u.ID,
+		Name:            u.Name,
+		Slug:            u.Slug,
+		Country:         derefString(u.Country),
+		State:           derefString(u.State),
+		City:            derefString(u.City),
+		Logo:            derefString(u.Logo),
+		CoverImage:      derefString(u.CoverImage),
+		InstitutionType: derefString(u.InstitutionType),
+		CampusSetting:   derefString(u.CampusSetting),
+		TuitionMin:      derefInt32(u.TuitionMin),
+		TuitionMax:      derefInt32(u.TuitionMax),
+		AcceptanceRate:  fromPgNumeric(u.AcceptanceRate),
+		IsPopular:       u.IsPopular,
+		IsFeatured:      u.IsFeatured,
+	}
+}
+
+func toUniversityDetailResponse(
+	u sqlc.University,
+	degreeLevels []sqlc.DegreeLevel,
+	majors []sqlc.Major,
+	studyFormats []sqlc.StudyFormat,
+	specialAffiliations []sqlc.SpecialAffiliation,
+	athletics []sqlc.Athletic,
+	supportServices []sqlc.SupportService,
+) *UniversityDetailResponse {
+	return &UniversityDetailResponse{
+		CreateUniversityResponse: *toCreateUniversityResponse(u),
+		DegreeLevels:             toLookupItems[sqlc.DegreeLevel, DegreeLevelResponse](degreeLevels, func(d sqlc.DegreeLevel) DegreeLevelResponse { return DegreeLevelResponse{ID: d.ID, Name: d.Name} }),
+		Majors:                   toLookupItems[sqlc.Major, MajorResponse](majors, func(m sqlc.Major) MajorResponse { return MajorResponse{ID: m.ID, Name: m.Name} }),
+		StudyFormats:             toLookupItems[sqlc.StudyFormat, StudyFormatResponse](studyFormats, func(s sqlc.StudyFormat) StudyFormatResponse { return StudyFormatResponse{ID: s.ID, Name: s.Name} }),
+		SpecialAffiliations:      toLookupItems[sqlc.SpecialAffiliation, SpecialAffiliationResponse](specialAffiliations, func(s sqlc.SpecialAffiliation) SpecialAffiliationResponse { return SpecialAffiliationResponse{ID: s.ID, Name: s.Name} }),
+		Athletics:                toLookupItems[sqlc.Athletic, AthleticResponse](athletics, func(a sqlc.Athletic) AthleticResponse { return AthleticResponse{ID: a.ID, Name: a.Name} }),
+		SupportServices:          toLookupItems[sqlc.SupportService, SupportServiceResponse](supportServices, func(s sqlc.SupportService) SupportServiceResponse { return SupportServiceResponse{ID: s.ID, Name: s.Name} }),
+	}
+}
+
+func toLookupItems[In any, Out any](items []In, convert func(In) Out) []Out {
+	out := make([]Out, len(items))
+	for i, item := range items {
+		out[i] = convert(item)
+	}
+	return out
+}
+
+func derefInt32(p *int32) int32 {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+func derefInt16AsInt32(p *int16) int32 {
+	if p == nil {
+		return 0
+	}
+	return int32(*p)
+}
+
+func toPgInt16(v int32) *int16 {
+	if v == 0 {
+		return nil
+	}
+	s := int16(v)
+	return &s
 }
 
 func toPgNumeric(v float64) pgtype.Numeric {

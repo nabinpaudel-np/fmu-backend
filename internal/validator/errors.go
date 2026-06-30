@@ -54,4 +54,5 @@ var errorMessages = map[string]string{
 	"lt":       "{0} must be less than {1}",
 	"lte":      "{0} must be at most {1}",
 	"uuid":     "{0} must be a valid UUID",
+	"url":      "{0} must be a valid URL",
 }

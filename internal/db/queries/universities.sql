@@ -8,12 +8,16 @@ INSERT INTO universities (
     need_based_aid, merit_scholarships, work_study, no_application_fee,
     acceptance_rate, testing_policy, sat_range, act_range,
     on_campus_housing, freshmen_required_on_campus,
-    contact_email, contact_phone, website
+    contact_email, contact_phone, website,
+    zipcode, tuition_min, tuition_max, avg_high_school_gpa,
+    founded_year, campus_size, gallery_images,
+    is_popular, is_featured
 )
 VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
     $11, $12, $13, $14, $15, $16, $17, $18, $19,
-    $20, $21, $22, $23, $24, $25, $26, $27, $28
+    $20, $21, $22, $23, $24, $25, $26, $27, $28,
+    $29, $30, $31, $32, $33, $34, $35, $36, $37
 )
 RETURNING *;
 
@@ -67,6 +71,57 @@ ON CONFLICT (university_id, support_service_id) DO NOTHING;
 
 -- name: GetMajors :many
 SELECT id, name FROM majors ORDER BY name;
+
+-- name: ListUniversities :many
+SELECT * FROM universities ORDER BY name LIMIT $1 OFFSET $2;
+
+-- name: CountUniversities :one
+SELECT COUNT(*) FROM universities;
+
+-- name: GetUniversityByID :one
+SELECT * FROM universities WHERE id = $1;
+
+-- name: GetUniversityDegreeLevels :many
+SELECT dl.id, dl.name
+FROM degree_levels dl
+JOIN university_degree_levels udl ON dl.id = udl.degree_level_id
+WHERE udl.university_id = $1
+ORDER BY dl.name;
+
+-- name: GetUniversityMajors :many
+SELECT m.id, m.name
+FROM majors m
+JOIN university_majors um ON m.id = um.major_id
+WHERE um.university_id = $1
+ORDER BY m.name;
+
+-- name: GetUniversityStudyFormats :many
+SELECT sf.id, sf.name
+FROM study_formats sf
+JOIN university_study_formats usf ON sf.id = usf.study_format_id
+WHERE usf.university_id = $1
+ORDER BY sf.name;
+
+-- name: GetUniversitySpecialAffiliations :many
+SELECT sa.id, sa.name
+FROM special_affiliations sa
+JOIN university_special_affiliations usa ON sa.id = usa.special_affiliation_id
+WHERE usa.university_id = $1
+ORDER BY sa.name;
+
+-- name: GetUniversityAthletics :many
+SELECT a.id, a.name
+FROM athletics a
+JOIN university_athletics ua ON a.id = ua.athletic_id
+WHERE ua.university_id = $1
+ORDER BY a.name;
+
+-- name: GetUniversitySupportServices :many
+SELECT ss.id, ss.name
+FROM support_services ss
+JOIN university_support_services uss ON ss.id = uss.support_service_id
+WHERE uss.university_id = $1
+ORDER BY ss.name;
 
 -- name: GetDegreeLevels :many
 SELECT id, name FROM degree_levels ORDER BY name;

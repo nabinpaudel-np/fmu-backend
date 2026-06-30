@@ -2,11 +2,20 @@ package university
 
 import (
 	"context"
+	"errors"
 	"log"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+
+	"fmu-backend/internal/errs"
+	"fmu-backend/internal/pagination"
 )
 
 type UniversityService interface {
 	Create(ctx context.Context, req *CreateUniversityRequest) (*CreateUniversityResponse, error)
+	Get(ctx context.Context, q pagination.Query, f Filters) ([]UniversityListItem, int64, error)
+	GetByID(ctx context.Context, id string) (*UniversityDetailResponse, error)
 	GetMajors(ctx context.Context) ([]MajorResponse, error)
 	GetDegreeLevels(ctx context.Context) ([]DegreeLevelResponse, error)
 	GetStudyFormats(ctx context.Context) ([]StudyFormatResponse, error)
@@ -41,6 +50,64 @@ func (s *universityService) Create(ctx context.Context, req *CreateUniversityReq
 	}
 
 	return toCreateUniversityResponse(row), nil
+}
+
+func (s *universityService) Get(ctx context.Context, q pagination.Query, f Filters) ([]UniversityListItem, int64, error) {
+	rows, total, err := s.repo.Get(ctx, q, f)
+	if err != nil {
+		log.Default().Printf("failed to list universities: %v", err)
+		return nil, 0, err
+	}
+	items := make([]UniversityListItem, len(rows))
+	for i, row := range rows {
+		items[i] = toUniversityListItem(row)
+	}
+	return items, total, nil
+}
+
+func (s *universityService) GetByID(ctx context.Context, id string) (*UniversityDetailResponse, error) {
+	row, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errs.ErrNotFound
+		}
+		// Bad UUIDs never reach the row scan — Postgres rejects the cast
+		// before the row exists, so the error is 22P02 (invalid_text_representation),
+		// not ErrNoRows. Treat both as "not found" so the handler returns 404.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "22P02" {
+			return nil, errs.ErrNotFound
+		}
+		log.Default().Printf("failed to get university %s: %v", id, err)
+		return nil, err
+	}
+
+	degreeLevels, err := s.repo.GetUniversityDegreeLevels(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	majors, err := s.repo.GetUniversityMajors(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	studyFormats, err := s.repo.GetUniversityStudyFormats(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	specialAffiliations, err := s.repo.GetUniversitySpecialAffiliations(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	athletics, err := s.repo.GetUniversityAthletics(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	supportServices, err := s.repo.GetUniversitySupportServices(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	return toUniversityDetailResponse(row, degreeLevels, majors, studyFormats, specialAffiliations, athletics, supportServices), nil
 }
 
 func (s *universityService) GetMajors(ctx context.Context) ([]MajorResponse, error) {

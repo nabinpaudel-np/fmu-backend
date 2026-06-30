@@ -1,8 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/joho/godotenv"
@@ -25,6 +27,17 @@ func main() {
 		log.Fatal(err)
 	}
 
+	dbURL := cfg.DatabaseURL
+	if dbURL == "" {
+		dbURL = fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
+			cfg.DBUser, cfg.DBPassword, cfg.DBHost, cfg.DBPort, cfg.DBName)
+	}
+	dbURL = "pgx5" + strings.TrimPrefix(dbURL, "postgres")
+
+	if err := db.RunMigrations(dbURL, "internal/db/migrations"); err != nil {
+		log.Fatalf("migrations failed: %v", err)
+	}
+
 	pool, err := db.NewPostgres(cfg)
 	if err != nil {
 		log.Fatal(err)
@@ -42,13 +55,16 @@ func main() {
 	authSvc := auth.NewAuthService(cfg, userSvc, tokenSvc, oauthSvc)
 	authHandler := auth.NewAuthHandler(authSvc)
 
+	authMW := auth.AuthMiddleware(cfg)
+	adminMW := auth.RequireRole(auth.RoleAdmin)
+
 	universityRepo := university.NewUniversityRepository(queries, pool)
 	universitySvc := university.NewUniversityService(universityRepo)
 	universityHandler := university.NewUniversityHandler(universitySvc)
 
 	r := chi.NewRouter()
 	auth.RegisterRoutes(r, authHandler)
-	university.RegisterRoutes(r, universityHandler)
+	university.RegisterRoutes(r, universityHandler, authMW, adminMW)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,

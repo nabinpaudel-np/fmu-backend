@@ -15,6 +15,7 @@ type Config struct {
 	DBPassword         string        `env:"DB_PASSWORD,required"`
 	DBName             string        `env:"DB_NAME,required"`
 	DBPort             int           `env:"DB_PORT" envDefault:"5432"`
+	DatabaseURL        string        `env:"DATABASE_URL" envDefault:""`
 	AccessTokenSecret  string        `env:"ACCESS_TOKEN_SECRET,required"`
 	AccessTokenExpiry  time.Duration `env:"ACCESS_TOKEN_EXPIRY" envDefault:"60m"`
 	RefreshTokenExpiry time.Duration `env:"REFRESH_TOKEN_EXPIRY" envDefault:"168h"`
