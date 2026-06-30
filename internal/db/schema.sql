@@ -151,6 +151,15 @@ CREATE TABLE public.universities (
     contact_email character varying(255),
     contact_phone character varying(50),
     website character varying(500),
+    zipcode character varying(20),
+    tuition_min integer,
+    tuition_max integer,
+    avg_high_school_gpa numeric(4,2),
+    founded_year smallint,
+    campus_size character varying(100),
+    gallery_images text[],
+    is_popular boolean DEFAULT false NOT NULL,
+    is_featured boolean DEFAULT false NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );

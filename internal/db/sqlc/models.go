@@ -84,6 +84,15 @@ type University struct {
 	ContactEmail             *string
 	ContactPhone             *string
 	Website                  *string
+	Zipcode                  *string
+	TuitionMin               *int32
+	TuitionMax               *int32
+	AvgHighSchoolGpa         pgtype.Numeric
+	FoundedYear              *int16
+	CampusSize               *string
+	GalleryImages            []string
+	IsPopular                bool
+	IsFeatured               bool
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
 }
