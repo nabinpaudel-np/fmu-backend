@@ -1,0 +1,10 @@
+ALTER TABLE universities
+    DROP COLUMN is_featured,
+    DROP COLUMN is_popular,
+    DROP COLUMN gallery_images,
+    DROP COLUMN campus_size,
+    DROP COLUMN founded_year,
+    DROP COLUMN avg_high_school_gpa,
+    DROP COLUMN tuition_max,
+    DROP COLUMN tuition_min,
+    DROP COLUMN zipcode;
