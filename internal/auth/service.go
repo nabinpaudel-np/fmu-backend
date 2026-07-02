@@ -2,13 +2,11 @@ package auth
 
 import (
 	"context"
-	"fmt"
 	"fmu-backend/internal/config"
 	"fmu-backend/internal/errs"
 	"fmu-backend/internal/oauth"
 	"fmu-backend/internal/token"
 	"fmu-backend/internal/user"
-	"net/url"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -16,10 +14,11 @@ import (
 type AuthService interface {
 	Register(ctx context.Context, req *RegisterRequest) (*RegisterResponse, error)
 	Login(ctx context.Context, req *LoginRequest, userAgent string) (*LoginResponse, error)
-	Refresh(ctx context.Context, req *RefreshRequest, userAgent string) (*RefreshResponse, error)
-	GoogleLogin(ctx context.Context, code string, userAgent string) (*LoginResponse, error)
-	GetGoogleAuthURL() string
-	BuildGoogleCallbackURL(res *LoginResponse) string
+	Refresh(ctx context.Context, refreshToken string, userAgent string) (*RefreshResponse, error)
+	GoogleLogin(ctx context.Context, code, codeVerifier string, userAgent string) (*LoginResponse, error)
+	GetGoogleAuthURL(state string) string
+	FrontendURL() string
+	Me(ctx context.Context, userID string) (*MeResponse, error)
 	Logout(ctx context.Context, refreshToken string) error
 }
 
@@ -73,38 +72,20 @@ func (s *authService) Login(ctx context.Context, req *LoginRequest, userAgent st
 		return nil, errs.ErrInvalidCredentials
 	}
 
-	accessToken, err := s.tokenService.CreateAccessToken(existing.ID, existing.Email, existing.Role)
+	res, err := s.buildLoginResponse(ctx, existing.ID, existing.Email, existing.Role, existing.Avatar, existing.FullName, userAgent)
 	if err != nil {
-		return nil, errs.ErrInternalServer
+		return nil, err
 	}
-
-	refreshToken, err := s.tokenService.CreateRefreshToken(ctx, existing.ID, userAgent)
-	if err != nil {
-		return nil, errs.ErrInternalServer
-	}
-
-	avatar := ""
-	if existing.Avatar != nil {
-		avatar = *existing.Avatar
-	}
-
-	return &LoginResponse{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		UserID:       existing.ID,
-		FullName:     existing.FullName,
-		Email:        existing.Email,
-		Avatar:       avatar,
-	}, nil
+	return res, nil
 }
 
-func (s *authService) Refresh(ctx context.Context, req *RefreshRequest, userAgent string) (*RefreshResponse, error) {
-	userID, err := s.tokenService.ValidateRefreshToken(ctx, req.RefreshToken)
+func (s *authService) Refresh(ctx context.Context, refreshToken string, userAgent string) (*RefreshResponse, error) {
+	userID, err := s.tokenService.ValidateRefreshToken(ctx, refreshToken)
 	if err != nil {
 		return nil, err
 	}
 
-	tokenHash := token.HashRefreshToken(req.RefreshToken)
+	tokenHash := token.HashRefreshToken(refreshToken)
 	if err := s.tokenService.DeleteByTokenHash(ctx, tokenHash); err != nil {
 		return nil, errs.ErrInternalServer
 	}
@@ -123,7 +104,7 @@ func (s *authService) Refresh(ctx context.Context, req *RefreshRequest, userAgen
 		return nil, errs.ErrInternalServer
 	}
 
-	refreshToken, err := s.tokenService.CreateRefreshToken(ctx, u.ID, userAgent)
+	newRefreshToken, err := s.tokenService.CreateRefreshToken(ctx, u.ID, userAgent)
 	if err != nil {
 		return nil, errs.ErrInternalServer
 	}
@@ -135,7 +116,7 @@ func (s *authService) Refresh(ctx context.Context, req *RefreshRequest, userAgen
 
 	return &RefreshResponse{
 		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
+		RefreshToken: newRefreshToken,
 		UserID:       u.ID,
 		FullName:     u.FullName,
 		Email:        u.Email,
@@ -143,22 +124,40 @@ func (s *authService) Refresh(ctx context.Context, req *RefreshRequest, userAgen
 	}, nil
 }
 
-func (s *authService) GetGoogleAuthURL() string {
-	return s.oauthService.GetGoogleAuthURL()
+func (s *authService) Me(ctx context.Context, userID string) (*MeResponse, error) {
+	u, err := s.userService.GetByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	if u == nil {
+		return nil, errs.ErrUserNotFound
+	}
+
+	avatar := ""
+	if u.Avatar != nil {
+		avatar = *u.Avatar
+	}
+
+	return &MeResponse{
+		UserID:   u.ID,
+		FullName: u.FullName,
+		Email:    u.Email,
+		Avatar:   avatar,
+		Role:     u.Role,
+	}, nil
 }
 
-func (s *authService) BuildGoogleCallbackURL(res *LoginResponse) string {
-	return fmt.Sprintf(
-		"%s/auth/callback?access_token=%s&refresh_token=%s&return_to=%s",
-		s.cfg.FrontendURL,
-		url.QueryEscape(res.AccessToken),
-		url.QueryEscape(res.RefreshToken),
-		url.QueryEscape("/"),
-	)
+func (s *authService) GetGoogleAuthURL(state string) string {
+	return s.oauthService.GetGoogleAuthURL(state)
 }
 
-func (s *authService) GoogleLogin(ctx context.Context, code string, userAgent string) (*LoginResponse, error) {
-	googleUser, err := s.oauthService.ExchangeGoogleCode(ctx, code)
+func (s *authService) FrontendURL() string {
+	return s.cfg.FrontendURL
+}
+
+func (s *authService) GoogleLogin(ctx context.Context, code, codeVerifier string, userAgent string) (*LoginResponse, error) {
+	googleUser, err := s.oauthService.ExchangeGoogleCode(ctx, code, codeVerifier)
 	if err != nil {
 		return nil, err
 	}
@@ -183,34 +182,45 @@ func (s *authService) GoogleLogin(ctx context.Context, code string, userAgent st
 		}
 	}
 
-	accessToken, err := s.tokenService.CreateAccessToken(user.ID, user.Email, user.Role)
+	res, err := s.buildLoginResponse(ctx, user.ID, user.Email, user.Role, user.Avatar, user.FullName, userAgent)
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func (s *authService) buildLoginResponse(ctx context.Context, userID, email, role string, avatar *string, fullName, userAgent string) (*LoginResponse, error) {
+	accessToken, err := s.tokenService.CreateAccessToken(userID, email, role)
 	if err != nil {
 		return nil, errs.ErrInternalServer
 	}
 
-	refreshToken, err := s.tokenService.CreateRefreshToken(ctx, user.ID, userAgent)
+	refreshToken, err := s.tokenService.CreateRefreshToken(ctx, userID, userAgent)
 	if err != nil {
 		return nil, errs.ErrInternalServer
 	}
 
-	avatar := ""
-	if user.Avatar != nil {
-		avatar = *user.Avatar
+	avatarStr := ""
+	if avatar != nil {
+		avatarStr = *avatar
 	}
 
 	return &LoginResponse{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		UserID:       user.ID,
-		FullName:     user.FullName,
-		Email:        user.Email,
-		Avatar:       avatar,
+		UserID:       userID,
+		FullName:     fullName,
+		Email:        email,
+		Avatar:       avatarStr,
 	}, nil
 }
 
 func (s *authService) Logout(ctx context.Context, refreshToken string) error {
-	_, err := s.tokenService.ValidateRefreshToken(ctx, refreshToken)
-	if err != nil {
+	if refreshToken == "" {
+		return nil
+	}
+
+	if _, err := s.tokenService.ValidateRefreshToken(ctx, refreshToken); err != nil {
 		return err
 	}
 

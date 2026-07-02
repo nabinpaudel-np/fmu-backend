@@ -12,8 +12,8 @@ import (
 )
 
 type OAuthService interface {
-	GetGoogleAuthURL() string
-	ExchangeGoogleCode(ctx context.Context, code string) (*GoogleUser, error)
+	GetGoogleAuthURL(state string) string
+	ExchangeGoogleCode(ctx context.Context, code, codeVerifier string) (*GoogleUser, error)
 }
 
 type oauthService struct {
@@ -35,12 +35,20 @@ func NewOAuthService(cfg *config.Config) OAuthService {
 	}
 }
 
-func (s *oauthService) GetGoogleAuthURL() string {
-	return s.oauthConfig.AuthCodeURL("state")
+// GetGoogleAuthURL builds the Google auth URL. `state` doubles as both the
+// OAuth state (CSRF) and PKCE code_verifier. `prompt=select_account` forces
+// the picker so multi-account users don't get silently logged in as the
+// wrong one.
+func (s *oauthService) GetGoogleAuthURL(state string) string {
+	return s.oauthConfig.AuthCodeURL(
+		state,
+		oauth2.S256ChallengeOption(state),
+		oauth2.SetAuthURLParam("prompt", "select_account"),
+	)
 }
 
-func (s *oauthService) ExchangeGoogleCode(ctx context.Context, code string) (*GoogleUser, error) {
-	token, err := s.oauthConfig.Exchange(ctx, code)
+func (s *oauthService) ExchangeGoogleCode(ctx context.Context, code, codeVerifier string) (*GoogleUser, error) {
+	token, err := s.oauthConfig.Exchange(ctx, code, oauth2.VerifierOption(codeVerifier))
 	if err != nil {
 		return nil, errors.New("failed to exchange code with Google")
 	}

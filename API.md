@@ -5,7 +5,7 @@ Backend API for the FMU (Find My University) application. This document covers e
 - **Base URL (dev):** `http://localhost:3000`
 - **All endpoints are prefixed with:** `/api/v1`
 - **Content type:** `application/json` for all request and response bodies
-- **Auth:** JWT bearer tokens (except where marked public)
+- **Auth:** HttpOnly session cookies (except where marked public) — see [Authentication](#authentication)
 
 ---
 
@@ -32,14 +32,13 @@ curl -X POST http://localhost:3000/api/v1/auth/register \
   -H "Content-Type: application/json" \
   -d '{"full_name":"Ada Lovelace","email":"ada@example.com","password":"correct-horse-battery-staple"}'
 
-# 2. Log in to get tokens
-curl -X POST http://localhost:3000/api/v1/auth/login \
+# 2. Log in — response sets HttpOnly cookies
+curl -c cookies.txt -X POST http://localhost:3000/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"ada@example.com","password":"correct-horse-battery-staple"}'
 
-# 3. Use the access token on protected endpoints
-curl http://localhost:3000/api/v1/universities \
-  -H "Authorization: Bearer <access_token>"
+# 3. Reuse the cookie jar on subsequent requests
+curl -b cookies.txt http://localhost:3000/api/v1/universities
 ```
 
 ---
@@ -98,20 +97,27 @@ curl http://localhost:3000/api/v1/universities \
 
 ## Authentication
 
-The API uses two tokens issued at login:
+The API is session-based. Logging in issues two HttpOnly cookies that the browser sends automatically on every request — JavaScript never sees the token values.
 
-| Token          | Format                                | TTL  | Purpose                                       |
-|----------------|---------------------------------------|------|-----------------------------------------------|
-| `access_token` | JWT (HS256)                           | 60m  | Sent in `Authorization: Bearer <token>` header|
-| `refresh_token`| Opaque random string (stored hashed)  | 168h | Used to mint a new access token               |
+| Cookie         | Path             | TTL   | HttpOnly | SameSite | Purpose                              |
+|----------------|------------------|-------|----------|----------|--------------------------------------|
+| `access_token` | `/`              | 60m   | yes      | `Lax`    | JWT (HS256) carried on every request |
+| `refresh_token`| `/api/v1/auth`   | 168h  | yes      | `Lax`    | Used by `/auth/refresh` to rotate    |
 
-**Sending an authenticated request:**
+Both cookies are also marked `Secure` when `COOKIE_SECURE=true` (production). `HttpOnly` prevents JS access; `SameSite=Lax` blocks cross-site POSTs from sending the cookies, which is the CSRF posture (no separate CSRF token needed).
+
+**An authenticated request — what the browser sends:**
+
 ```http
 GET /api/v1/universities HTTP/1.1
-Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
+Host: localhost:3000
+Cookie: access_token=eyJhbGciOiJIUzI1NiIs...
 ```
 
-The access token contains these claims (decodable for UI display, but never trust client-side for auth decisions):
+The frontend does not read or set these cookies. The browser handles storage and attachment; the API server handles rotation and revocation. For cross-origin SPAs, the fetch/axios call must include `credentials: 'include'` (default for same-origin).
+
+The access token is a JWT containing:
+
 ```json
 {
   "user_id": "d3b07384-d9a2-4e0a-b71e-1c9f3e3e0a1b",
@@ -123,13 +129,13 @@ The access token contains these claims (decodable for UI display, but never trus
 }
 ```
 
-**401 cases (token rejected):**
-- Missing `Authorization` header
-- Header doesn't start with `Bearer `
-- Token signature invalid / expired
-- (User may still exist — token might just be stale)
+(The server uses this internally. The frontend should call `GET /api/v1/auth/me` on app load to bootstrap user state — see [the endpoint](#get-apiv1authme) below.)
 
-When you get a 401, call `/api/v1/auth/refresh` with the refresh token to get a new access token. If that also fails, send the user back to the login screen.
+**401 cases (cookie rejected):**
+- `access_token` cookie missing (user is not logged in, or cookie expired and was cleared)
+- JWT signature invalid / expired
+
+When you get a 401, call `POST /api/v1/auth/refresh` (no body — the refresh cookie is read from the request automatically). It rotates the refresh token and issues a new access token. If that also returns 401, the refresh cookie is gone/expired/revoked — send the user back to the login screen.
 
 ---
 
@@ -148,13 +154,13 @@ There are two roles:
 UPDATE users SET role = 'admin' WHERE email = 'you@example.com';
 ```
 
-The change takes effect on the user's next login (existing access tokens still say `student`).
+The change takes effect on the user's next login (existing session cookies still carry the old `student` role until the access token expires or the user logs in again).
 
 **Authorization errors:**
 
 | Status | Meaning                                                                |
 |--------|------------------------------------------------------------------------|
-| `401`  | No token / invalid token — user must log in                            |
+| `401`  | No session cookie / invalid cookie — user must log in                 |
 | `403`  | Authenticated but role not allowed for this action                     |
 
 ---
@@ -234,7 +240,7 @@ Array fields report the index in the field name, e.g. `GalleryImages[2]` for the
 | `200`  | Success                                                                          |
 | `201`  | Resource created (used for `POST /api/v1/universities`)                          |
 | `400`  | Bad request — malformed body or validation failure                               |
-| `401`  | Unauthenticated — missing or invalid token                                       |
+| `401`  | Unauthenticated — missing or invalid session cookie                             |
 | `403`  | Authenticated but not allowed (e.g. student trying to create a university)       |
 | `404`  | Resource not found                                                               |
 | `409`  | Conflict (e.g. duplicate slug, email already registered)                         |
@@ -279,7 +285,7 @@ Create a new account. New users are always assigned the `student` role.
 }
 ```
 
-> ⚠️ This response does **not** include tokens. The user must then call `/api/v1/auth/login` to receive them.
+> ⚠️ This response does **not** set auth cookies. The user must then call `/api/v1/auth/login` to start a session.
 
 **Errors:**
 - `400` — invalid body or validation failure
@@ -289,7 +295,7 @@ Create a new account. New users are always assigned the `student` role.
 
 ### POST `/api/v1/auth/login`
 
-Exchange email + password for an access token and a refresh token.
+Exchange email + password for an authenticated session. On success the response sets the `access_token` and `refresh_token` cookies and returns the user object.
 
 **Auth:** public
 
@@ -306,13 +312,11 @@ Exchange email + password for an access token and a refresh token.
 | `email`    | string | required, valid email  |
 | `password` | string | required, min 6 chars  |
 
-**Response:** `200 OK`
+**Response:** `200 OK` — sets cookies, returns:
 ```json
 {
   "success": true,
   "data": {
-    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "refresh_token": "d4e5f6a7b8c9...",
     "user_id": "d3b07384-d9a2-4e0a-b71e-1c9f3e3e0a1b",
     "full_name": "Ada Lovelace",
     "email": "ada@example.com",
@@ -321,10 +325,23 @@ Exchange email + password for an access token and a refresh token.
 }
 ```
 
-**Storage recommendation (frontend):**
-- `access_token` — keep in memory (or sessionStorage). Send as `Authorization: Bearer ...` on every request.
-- `refresh_token` — keep in localStorage. Use only when access token expires (401 response).
-- `user_id`, `full_name`, `email`, `avatar` — show in UI as needed.
+**Cookies set on success:**
+
+| Cookie         | Value | Path            | Max-Age | Flags                              |
+|----------------|-------|-----------------|---------|------------------------------------|
+| `access_token` | JWT   | `/`             | 60m     | HttpOnly; SameSite=Lax; Secure*    |
+| `refresh_token`| opaque| `/api/v1/auth`  | 168h    | HttpOnly; SameSite=Lax; Secure*    |
+
+*`Secure` is set when `COOKIE_SECURE=true` (production). Off by default so the cookies work over `http://localhost`.
+
+**Storage recommendation (frontend):** nothing to store. The browser handles the cookies. Render `user_id`, `full_name`, `email`, `avatar` from the response body as needed.
+
+**Curl example:**
+```bash
+curl -c cookies.txt -X POST http://localhost:3000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"ada@example.com","password":"correct-horse-battery-staple"}'
+```
 
 **Errors:**
 - `400` — invalid body or validation failure
@@ -334,32 +351,35 @@ Exchange email + password for an access token and a refresh token.
 
 ### POST `/api/v1/auth/refresh`
 
-Get a new access token using a refresh token. The old refresh token is invalidated and a new one is returned (rotation).
+Rotate the session. Reads the `refresh_token` cookie (no request body), invalidates it server-side, and sets a fresh pair of cookies. Returns the current user object.
 
-**Auth:** public
+**Auth:** public — the `refresh_token` cookie itself is the credential.
 
-**Request body:**
+**Request body:** none. The endpoint reads the `refresh_token` cookie from the request.
+
+**Response:** `200 OK` — sets new cookies, returns:
 ```json
 {
-  "refresh_token": "d4e5f6a7b8c9..."
+  "success": true,
+  "data": {
+    "user_id": "d3b07384-d9a2-4e0a-b71e-1c9f3e3e0a1b",
+    "full_name": "Ada Lovelace",
+    "email": "ada@example.com",
+    "avatar": "https://cdn.example.com/avatars/ada.png"
+  }
 }
 ```
 
-| Field           | Type   | Rules     |
-|-----------------|--------|-----------|
-| `refresh_token` | string | required  |
-
-**Response:** `200 OK` — same shape as login.
+The previous `refresh_token` is dead the moment the response is sent. Use the cookies from the new response on the retry.
 
 **Errors:**
-- `400` — invalid body
-- `401` — refresh token is invalid, expired, or revoked
+- `401` — `refresh_token` cookie missing, invalid, expired, or revoked. Both cookies are cleared on this response.
 
-**Recommended flow on 401:**
-1. Catch the 401 from any protected endpoint
-2. Call `/auth/refresh` with the stored refresh token
-3. If success → retry the original request with the new access token
-4. If 401 again → user must log in from scratch
+**Recommended flow on 401 from a protected endpoint:**
+1. Catch the 401
+2. `POST /api/v1/auth/refresh` (with `credentials: 'include'` so the cookie is sent)
+3. On 200 → retry the original request (the new `access_token` cookie is now in the jar)
+4. On 401 again → user must log in from scratch
 
 ---
 
@@ -371,7 +391,13 @@ Start the Google OAuth login flow. Redirects the user to Google's consent screen
 
 **Response:** `302 Found` redirect to `https://accounts.google.com/...`. The browser follows this automatically.
 
-After consent, Google redirects back to `/api/v1/auth/google/callback?code=...` which mints tokens.
+**Security posture:**
+
+- The server generates a fresh random `state` value (also used as the PKCE `code_verifier`), stores it in a short-lived `oauth_state` cookie scoped to the callback URL, and adds it to the auth request along with the S256 challenge.
+- `prompt=select_account` is set so users with multiple Google accounts always see the account picker.
+- The `code` query parameter is **never** accepted on this endpoint. Accepting it would let an attacker trick a victim into completing a flow with the attacker's authorization code (account takeover via session fixation). To re-run the flow, send the user here with no query string.
+
+After consent, Google redirects back to `/api/v1/auth/google/callback?code=...&state=...`, which validates the state, exchanges the code, sets the auth cookies, and 302s the user to the frontend.
 
 ---
 
@@ -381,35 +407,78 @@ OAuth callback — completes the Google login. The frontend should not call this
 
 **Auth:** public
 
-**Query params:** `code` (required, supplied by Google)
+**Query params (supplied by Google):**
 
-**Response:** `200 OK` — same shape as login (`{access_token, refresh_token, user_id, ...}`)
+| Param        | Required | Notes                                              |
+|--------------|----------|----------------------------------------------------|
+| `code`       | yes      | Authorization code (unless `error` is set)         |
+| `state`      | yes      | Must match the value stored in the `oauth_state` cookie at flow initiation. CSRF check. |
+| `error`      | no       | If present, the flow failed at the provider (e.g. `access_denied`, `invalid_scope`) |
+| `error_description` | no | Human-readable error detail from the provider      |
 
-**Errors:**
-- `400` — missing `code` param
-- `409` — email already registered with password login (must log in with password instead)
+**Response on success:** `302 Found` redirect to `FRONTEND_URL` (e.g. `http://localhost:3001/`). The `access_token` and `refresh_token` cookies are set on this response, and the `oauth_state` cookie is cleared. There is no JSON body and no tokens in the URL — the frontend just becomes authenticated as soon as the next API call is made.
+
+**Response on provider error (`?error=...` from Google):** `302 Found` redirect to `FRONTEND_URL?error=<error>&error_description=<error_description>`. The `oauth_state` cookie is cleared. The frontend should display the error and prompt the user to try again.
+
+**Response on backend validation failure:**
+
+| Status | Cause                                                                            | Response     |
+|--------|----------------------------------------------------------------------------------|--------------|
+| `400`  | Missing `code` (and no `error` from provider)                                    | JSON error   |
+| `401`  | `state` doesn't match the `oauth_state` cookie — CSRF check failed              | JSON error   |
+
+**Account conflict:** if the Google account's email is already registered with password login, the response is a `302` redirect to `FRONTEND_URL?error=email_taken&error_description=this+email+is+already+registered+with+password+login`. The frontend should send the user to the password login screen.
 
 ---
 
 ### DELETE `/api/v1/auth/logout`
 
-Invalidate a refresh token (logs the user out of the current session).
+End the current session. Reads the `refresh_token` cookie (no request body), revokes it server-side, and clears both cookies.
 
-**Auth:** public
+**Auth:** public — the `refresh_token` cookie is the credential.
 
-**Request body:**
-```json
-{
-  "refresh_token": "d4e5f6a7b8c9..."
-}
-```
+**Request body:** none.
 
 **Response:** `200 OK`
 ```json
 { "success": true, "data": null }
 ```
 
-After logout, the access token still works until it expires (max 60m), but the refresh token is dead and can't mint new ones. For full immediate invalidation, also drop the access token from memory on the client side.
+On success the response also sets `access_token` and `refresh_token` cookies with `Max-Age=0` to clear them in the browser. The endpoint is idempotent — if the cookie is already missing or expired, it still returns 200 and clears whatever remains.
+
+After logout, the server immediately rejects any further use of the old refresh token. The `access_token` cookie is also cleared, so no protected requests will succeed.
+
+---
+
+### GET `/api/v1/auth/me`
+
+Return the currently-authenticated user. Use this on app load to bootstrap user state in the SPA — it's the only way to know "who am I?" from a page reload, because the auth cookies are HttpOnly and the frontend can't read the JWT directly.
+
+**Auth:** required (must have a valid `access_token` cookie)
+
+**Response:** `200 OK`
+```json
+{
+  "success": true,
+  "data": {
+    "user_id": "d3b07384-d9a2-4e0a-b71e-1c9f3e3e0a1b",
+    "full_name": "Ada Lovelace",
+    "email": "ada@example.com",
+    "avatar": "https://cdn.example.com/avatars/ada.png",
+    "role": "student"
+  }
+}
+```
+
+The data is read fresh from the database on each call (cheap — `users` PK lookup), so avatar/name/role reflect the current state, not just the JWT claims.
+
+**Errors:**
+- `401` — no `access_token` cookie, or it's invalid/expired
+
+**Curl example:**
+```bash
+curl -b cookies.txt http://localhost:3000/api/v1/auth/me
+```
 
 ---
 
@@ -586,6 +655,38 @@ GET /api/v1/universities/search?q=mit
 
 > The same substring hits the GIN trigram index — no full table scans. Threshold is `similarity(...) > 0.2`, tunable in `internal/db/queries/universities.sql`.
 
+### GET `/api/v1/universities/stats`
+
+Aggregate counts for the admin dashboard. One Postgres round-trip; computed via `COUNT`, `COUNT(DISTINCT country)`, and `COUNT(*) FILTER (WHERE …)` against the `universities` table.
+
+**Auth:** admin only (requires an authenticated admin session cookie)
+
+**Response:** `200 OK`
+```json
+{
+  "success": true,
+  "data": {
+    "total_universities": 247,
+    "total_countries": 12,
+    "total_featured": 18,
+    "total_popular": 24
+  }
+}
+```
+
+| Field               | Type | Notes                                            |
+|---------------------|------|--------------------------------------------------|
+| `total_universities`| int  | Row count of the `universities` table           |
+| `total_countries`   | int  | Distinct non-null `country` values              |
+| `total_featured`    | int  | Rows where `is_featured = true`                  |
+| `total_popular`     | int  | Rows where `is_popular = true`                   |
+
+**Errors:**
+- `401` — missing or invalid session cookie
+- `403` — authenticated but role is not `admin`
+
+---
+
 ### GET `/api/v1/universities/{id}`
 
 Get one university's full details, including all lookup-table references (majors, degree levels, study formats, etc.).
@@ -708,7 +809,7 @@ Get one university's full details, including all lookup-table references (majors
 
 Create a new university.
 
-**Auth:** admin only (must send `Authorization: Bearer <admin_jwt>`)
+**Auth:** admin only (requires an authenticated admin session cookie)
 
 **Request body:**
 ```json
@@ -807,7 +908,7 @@ Create a new university.
     ]
   }
   ```
-- `401` — missing or invalid token
+- `401` — missing or invalid session cookie
 - `403` — authenticated but role is not `admin`
 - `409` — slug already taken:
   ```json
@@ -873,10 +974,10 @@ curl http://localhost:3000/api/v1/universities/lookups
 
 ## Putting it all together — frontend integration checklist
 
-- [ ] On app load: fetch `/api/v1/universities/lookups` and cache
-- [ ] On login/register: store `access_token` in memory + `refresh_token` in localStorage
-- [ ] Wrap `fetch`/`axios` to auto-attach `Authorization: Bearer <token>`
-- [ ] Wrap `fetch`/`axios` to retry once on 401 using `/auth/refresh`; on second 401, redirect to login
+- [ ] On app load: call `GET /api/v1/auth/me` to bootstrap the current user (treat a 401 as "not logged in"). Fetch `/api/v1/universities/lookups` and cache.
+- [ ] For cross-origin SPAs, configure your HTTP client to send `credentials: 'include'` on every request (same-origin requests get this for free)
+- [ ] On 401 from any protected endpoint: call `POST /api/v1/auth/refresh` (no body) and retry the original request; on second 401, clear the bootstrapped user state and redirect to login
+- [ ] On logout: `DELETE /api/v1/auth/logout` (no body) — the server clears the cookies; the SPA can also clear any cached user state
 - [ ] University list page: `GET /universities?page=N&page_size=20&<filters>`, render items + meta. See "Filters" in the List endpoint above — filter param names match the FilterSidebar's `searchParams` keys exactly.
 - [ ] University detail page: `GET /universities/{id}`, render all fields + lookup arrays
 - [ ] Admin "create university" form: 
@@ -890,4 +991,8 @@ curl http://localhost:3000/api/v1/universities/lookups
 
 ## CORS
 
-CORS is configured via the `ALLOWED_ORIGINS` env var (comma-separated list of origins, e.g. `ALLOWED_ORIGINS=http://localhost:3001`). Defaults to empty, which blocks all cross-origin requests. The middleware is mounted at the top of the chi router in `cmd/api/main.go` (`github.com/go-chi/cors`), so preflight `OPTIONS` requests are handled before any auth middleware runs. Credentials are not currently sent cross-origin; all auth endpoints return tokens in the JSON response body. If cookie-based auth is added later, set `AllowCredentials: true` in `cmd/api/main.go` and ensure the origin list does not include `*`.
+CORS is configured via the `ALLOWED_ORIGINS` env var (comma-separated list of origins, e.g. `ALLOWED_ORIGINS=http://localhost:3001`). Defaults to empty, which blocks all cross-origin requests. The middleware is mounted at the top of the chi router in `cmd/api/main.go` (`github.com/go-chi/cors`), so preflight `OPTIONS` requests are handled before any auth middleware runs.
+
+`AllowCredentials: true` is enabled, which is required for the auth cookies to flow on cross-origin requests. As a consequence, the origin list **cannot include `*`** — the server refuses to start if it does. List explicit origins (`http://localhost:3001,https://app.example.com`).
+
+The SPA must opt in by sending `credentials: 'include'` (or `withCredentials: true` on `XMLHttpRequest`) on every fetch — same-origin requests get this for free, cross-origin requests do not.

@@ -14,9 +14,9 @@ func RegisterRoutes(
 ) {
 	r.With(authMW, adminMW).Post("/api/v1/universities", h.Create)
 
-	// Static, child-resource routes — must come before /{id} so chi's
-	// static-segment precedence resolves them first.
+	// Static routes go before /{id} so chi resolves them first.
 	r.Get("/api/v1/universities/search", h.Search)
+	r.With(authMW, adminMW).Get("/api/v1/universities/stats", h.Stats)
 	r.Get("/api/v1/universities/majors", h.GetMajors)
 	r.Get("/api/v1/universities/degree-levels", h.GetDegreeLevels)
 	r.Get("/api/v1/universities/study-formats", h.GetStudyFormats)
@@ -25,7 +25,7 @@ func RegisterRoutes(
 	r.Get("/api/v1/universities/support-services", h.GetSupportServices)
 	r.Get("/api/v1/universities/lookups", h.GetAllLookups)
 
-	// List + detail — /{id} last so static routes above win.
+	// /{id} last so the static routes above win.
 	r.Get("/api/v1/universities", h.Get)
 	r.Get("/api/v1/universities/{id}", h.GetByID)
 }

@@ -29,6 +29,7 @@ type UniversityRepository interface {
 	Get(ctx context.Context, q pagination.Query, f Filters) ([]sqlc.University, int64, error)
 	GetByID(ctx context.Context, id string) (sqlc.University, error)
 	Search(ctx context.Context, q string) ([]sqlc.SearchUniversitiesRow, error)
+	Stats(ctx context.Context) (*UniversityStats, error)
 	GetUniversityDegreeLevels(ctx context.Context, universityID string) ([]sqlc.DegreeLevel, error)
 	GetUniversityMajors(ctx context.Context, universityID string) ([]sqlc.Major, error)
 	GetUniversityStudyFormats(ctx context.Context, universityID string) ([]sqlc.StudyFormat, error)
@@ -43,13 +44,20 @@ type UniversityRepository interface {
 	GetSupportServices(ctx context.Context) ([]sqlc.SupportService, error)
 }
 
+type UniversityStats struct {
+	TotalUniversities int64
+	TotalCountries    int64
+	TotalFeatured     int64
+	TotalPopular      int64
+}
+
 type universityRepository struct {
 	queries *sqlc.Queries
 	pool    *pgxpool.Pool
 }
 
-// maxSearchResults caps the payload for the /universities/search dropdown —
-// search has no filters to combine, so a hard cap keeps responses snappy.
+// maxSearchResults caps the /universities/search dropdown. No filters to
+// narrow with, so a hard cap keeps responses snappy.
 const maxSearchResults = 50
 
 func NewUniversityRepository(queries *sqlc.Queries, pool *pgxpool.Pool) UniversityRepository {
@@ -159,9 +167,8 @@ func (r *universityRepository) Get(ctx context.Context, q pagination.Query, f Fi
 	}
 
 	listArgs := append(append([]any{}, args...), q.Limit(), q.Offset())
-	// Column list spelled out: ALTER TABLE ADD COLUMN appends new columns to the
-	// runtime table, but schema.sql declares them inline — so SELECT * doesn't
-	// match the sqlc struct scan order.
+	// Columns spelled out: schema.sql order ≠ runtime table order, so
+	// SELECT * doesn't match the sqlc struct scan order.
 	listSQL := fmt.Sprintf(
 		"SELECT id, name, slug, overview, excerpt, country, state, city, full_location, cover_image, logo, institution_type, campus_setting, in_state_tuition, out_of_state_tuition, international_tuition, need_based_aid, merit_scholarships, work_study, no_application_fee, acceptance_rate, testing_policy, sat_range, act_range, on_campus_housing, freshmen_required_on_campus, contact_email, contact_phone, website, zipcode, tuition_min, tuition_max, avg_high_school_gpa, founded_year, campus_size, gallery_images, is_popular, is_featured, created_at, updated_at FROM universities u WHERE 1=1%s ORDER BY u.name LIMIT $%d OFFSET $%d",
 		where, len(listArgs)-1, len(listArgs),
@@ -206,8 +213,8 @@ func collectUniversities(rows pgx.Rows) ([]sqlc.University, error) {
 	return items, rows.Err()
 }
 
-// buildUniversitiesWhere returns a parameterized WHERE fragment (leading " AND ")
-// plus the matching args slice. Empty Filters produces empty output.
+// buildUniversitiesWhere returns a parameterized WHERE fragment (with a
+// leading " AND ") and the matching args. Empty Filters produces empty output.
 func buildUniversitiesWhere(f Filters) (string, []any) {
 	var clauses []string
 	var args []any
@@ -220,8 +227,7 @@ func buildUniversitiesWhere(f Filters) (string, []any) {
 		clauses = append(clauses, fmt.Sprintf(format, len(args)))
 	}
 
-	// EXISTS over a join table — one subquery per multi-value filter so they
-	// resolve to a single index hit instead of repeated joins.
+	// EXISTS subquery per filter — single index hit beats a join per row.
 	addExists := func(joinTable, lookupTable, idColumn string, values []string) {
 		if len(values) == 0 {
 			return
@@ -284,8 +290,8 @@ func buildUniversitiesWhere(f Filters) (string, []any) {
 	addExists("university_special_affiliations", "special_affiliations", "special_affiliation_id", f.SpecialAffiliations)
 	addExists("university_athletics", "athletics", "athletic_id", f.Athletics)
 
-	// Multiple has_X=true AND together; within one lookup param it's ANY (handled
-	// by addExists above).
+	// Multiple has_X=true are AND-ed; within a single lookup param it's ANY
+	// (handled by addExists above).
 	for _, name := range sortedSupportServiceNames(f.HasSupportService) {
 		args = append(args, name)
 		clauses = append(clauses, fmt.Sprintf(
@@ -300,8 +306,8 @@ func buildUniversitiesWhere(f Filters) (string, []any) {
 	return " AND " + strings.Join(clauses, " AND "), args
 }
 
-// Sorted: map iteration is randomized, and we want identical Filters to
-// produce identical parameter order so Postgres reuses a prepared plan.
+// Sorted: identical Filters must produce identical param order so
+// Postgres can reuse a prepared plan.
 func sortedSupportServiceNames(m map[string]bool) []string {
 	if len(m) == 0 {
 		return nil
@@ -320,6 +326,27 @@ func sortedSupportServiceNames(m map[string]bool) []string {
 
 func (r *universityRepository) GetByID(ctx context.Context, id string) (sqlc.University, error) {
 	return r.queries.GetUniversityByID(ctx, id)
+}
+
+func (r *universityRepository) Stats(ctx context.Context) (*UniversityStats, error) {
+	const query = `
+		SELECT
+			COUNT(*)::bigint AS total_universities,
+			COUNT(DISTINCT country)::bigint AS total_countries,
+			COUNT(*) FILTER (WHERE is_featured)::bigint AS total_featured,
+			COUNT(*) FILTER (WHERE is_popular)::bigint AS total_popular
+		FROM universities
+	`
+	var s UniversityStats
+	if err := r.pool.QueryRow(ctx, query).Scan(
+		&s.TotalUniversities,
+		&s.TotalCountries,
+		&s.TotalFeatured,
+		&s.TotalPopular,
+	); err != nil {
+		return nil, fmt.Errorf("stats: %w", err)
+	}
+	return &s, nil
 }
 
 func (r *universityRepository) GetUniversityDegreeLevels(ctx context.Context, universityID string) ([]sqlc.DegreeLevel, error) {
