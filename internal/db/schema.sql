@@ -29,6 +29,20 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 COMMENT ON EXTENSION pgcrypto IS 'cryptographic functions';
 
 
+--
+-- Name: pg_trgm; Type: EXTENSION; Schema: -; Owner: -
+--
+
+CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public;
+
+
+--
+-- Name: EXTENSION pg_trgm; Type: COMMENT; Schema: -; Owner: -
+--
+
+COMMENT ON EXTENSION pg_trgm IS 'text similarity measurement and index searching based on trigrams';
+
+
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
@@ -447,6 +461,41 @@ CREATE INDEX idx_refresh_tokens_user_id ON public.refresh_tokens USING btree (us
 --
 
 CREATE INDEX idx_universities_name ON public.universities USING btree (name);
+
+
+--
+-- Name: idx_universities_name_trgm; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_universities_name_trgm ON public.universities USING gin (name gin_trgm_ops);
+
+
+--
+-- Name: idx_universities_full_location_trgm; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_universities_full_location_trgm ON public.universities USING gin (full_location gin_trgm_ops);
+
+
+--
+-- Name: idx_universities_city_trgm; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_universities_city_trgm ON public.universities USING gin (city gin_trgm_ops);
+
+
+--
+-- Name: idx_universities_state_trgm; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_universities_state_trgm ON public.universities USING gin (state gin_trgm_ops);
+
+
+--
+-- Name: idx_universities_country_trgm; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_universities_country_trgm ON public.universities USING gin (country gin_trgm_ops);
 
 
 --
