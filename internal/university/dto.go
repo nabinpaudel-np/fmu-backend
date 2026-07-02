@@ -125,6 +125,17 @@ type UniversityDetailResponse struct {
 	SupportServices     []SupportServiceResponse     `json:"support_services"`
 }
 
+type UniversitySearchResult struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Slug         string `json:"slug"`
+	Country      string `json:"country"`
+	State        string `json:"state"`
+	City         string `json:"city"`
+	FullLocation string `json:"full_location"`
+	Logo         string `json:"logo"`
+}
+
 type CreateUniversityResponse struct {
 	ID                       string    `json:"id"`
 	Name                     string    `json:"name"`

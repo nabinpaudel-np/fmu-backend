@@ -120,6 +120,19 @@ func toUniversityListItem(u sqlc.University) UniversityListItem {
 	}
 }
 
+func toUniversitySearchResult(r sqlc.SearchUniversitiesRow) UniversitySearchResult {
+	return UniversitySearchResult{
+		ID:           r.ID,
+		Name:         r.Name,
+		Slug:         r.Slug,
+		Country:      r.Country,
+		State:        r.State,
+		City:         r.City,
+		FullLocation: r.FullLocation,
+		Logo:         r.Logo,
+	}
+}
+
 func toUniversityDetailResponse(
 	u sqlc.University,
 	degreeLevels []sqlc.DegreeLevel,
