@@ -25,8 +25,8 @@ type (
 	}
 
 	LoginResponse struct {
-		AccessToken  string `json:"access_token" example:"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."`
-		RefreshToken string `json:"refresh_token" example:"d4e5f6..."`
+		AccessToken  string `json:"-"`
+		RefreshToken string `json:"-"`
 		UserID       string `json:"user_id" example:"d3b07384-d9a2-4e0a-b71e-1c9f3e3e0a1b"`
 		FullName     string `json:"full_name" example:"Ada Lovelace"`
 		Email        string `json:"email" example:"ada@example.com"`
@@ -35,13 +35,11 @@ type (
 )
 
 type (
-	RefreshRequest struct {
-		RefreshToken string `json:"refresh_token" validate:"required" example:"d4e5f6..."`
-	}
+	RefreshRequest struct{}
 
 	RefreshResponse struct {
-		AccessToken  string `json:"access_token" example:"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."`
-		RefreshToken string `json:"refresh_token" example:"a1b2c3..."`
+		AccessToken  string `json:"-"`
+		RefreshToken string `json:"-"`
 		UserID       string `json:"user_id" example:"d3b07384-d9a2-4e0a-b71e-1c9f3e3e0a1b"`
 		FullName     string `json:"full_name" example:"Ada Lovelace"`
 		Email        string `json:"email" example:"ada@example.com"`
@@ -49,8 +47,12 @@ type (
 	}
 )
 
-type (
-	LogoutRequest struct {
-		RefreshToken string `json:"refresh_token" validate:"required" example:"a1b2c3..."`
-	}
-)
+type LogoutRequest struct{}
+
+type MeResponse struct {
+	UserID   string `json:"user_id" example:"d3b07384-d9a2-4e0a-b71e-1c9f3e3e0a1b"`
+	FullName string `json:"full_name" example:"Ada Lovelace"`
+	Email    string `json:"email" example:"ada@example.com"`
+	Avatar   string `json:"avatar,omitempty" example:"https://cdn.example.com/avatars/ada.png"`
+	Role     string `json:"role" example:"student"`
+}

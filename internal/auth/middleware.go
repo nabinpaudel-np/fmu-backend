@@ -2,7 +2,6 @@ package auth
 
 import (
 	"net/http"
-	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
 
@@ -15,13 +14,11 @@ import (
 func AuthMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			header := r.Header.Get("Authorization")
-			if header == "" || !strings.HasPrefix(header, "Bearer ") {
+			raw := GetAccessCookie(r)
+			if raw == "" {
 				response.Error(w, http.StatusUnauthorized, errs.ErrUnauthorized.Error())
 				return
 			}
-
-			raw := strings.TrimPrefix(header, "Bearer ")
 
 			claims := &token.AccessTokenClaims{}
 			parsed, err := jwt.ParseWithClaims(raw, claims, func(t *jwt.Token) (interface{}, error) {

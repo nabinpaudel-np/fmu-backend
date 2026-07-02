@@ -17,6 +17,7 @@ type UniversityService interface {
 	Get(ctx context.Context, q pagination.Query, f Filters) ([]UniversityListItem, int64, error)
 	GetByID(ctx context.Context, id string) (*UniversityDetailResponse, error)
 	Search(ctx context.Context, q string) ([]UniversitySearchResult, error)
+	Stats(ctx context.Context) (*StatsResponse, error)
 	GetMajors(ctx context.Context) ([]MajorResponse, error)
 	GetDegreeLevels(ctx context.Context) ([]DegreeLevelResponse, error)
 	GetStudyFormats(ctx context.Context) ([]StudyFormatResponse, error)
@@ -72,9 +73,9 @@ func (s *universityService) GetByID(ctx context.Context, id string) (*University
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, errs.ErrNotFound
 		}
-		// Bad UUIDs never reach the row scan — Postgres rejects the cast
-		// before the row exists, so the error is 22P02 (invalid_text_representation),
-		// not ErrNoRows. Treat both as "not found" so the handler returns 404.
+		// Bad UUIDs are rejected by the cast before any row scan, so we
+		// get 22P02 (invalid_text_representation) instead of ErrNoRows.
+		// Treat both as not-found so the handler returns 404.
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "22P02" {
 			return nil, errs.ErrNotFound
@@ -194,6 +195,20 @@ func (s *universityService) Search(ctx context.Context, q string) ([]UniversityS
 		items[i] = toUniversitySearchResult(row)
 	}
 	return items, nil
+}
+
+func (s *universityService) Stats(ctx context.Context) (*StatsResponse, error) {
+	stats, err := s.repo.Stats(ctx)
+	if err != nil {
+		log.Default().Printf("stats universities: %v", err)
+		return nil, err
+	}
+	return &StatsResponse{
+		TotalUniversities: stats.TotalUniversities,
+		TotalCountries:    stats.TotalCountries,
+		TotalFeatured:     stats.TotalFeatured,
+		TotalPopular:      stats.TotalPopular,
+	}, nil
 }
 
 func (s *universityService) GetAllLookups(ctx context.Context) (*AllLookupsResponse, error) {

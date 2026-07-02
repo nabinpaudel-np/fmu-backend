@@ -25,7 +25,8 @@ func NewUniversityHandler(universityService UniversityService) *UniversityHandle
 	}
 }
 
-// resourceField maps a lookup-table name to its request-DTO field name.
+// resourceField maps a lookup-table name to the request-DTO field that
+// references it, so error messages name the field the client sent.
 var resourceField = map[string]string{
 	"degree_levels":        "degree_level_ids",
 	"majors":               "major_ids",
@@ -35,9 +36,8 @@ var resourceField = map[string]string{
 	"support_services":     "support_service_ids",
 }
 
-// formatMissingIDs returns a human-readable list, capping at 10 IDs with
-// a "(and N more)" suffix so a payload with hundreds of bad IDs does not
-// blow up the response body.
+// formatMissingIDs caps the list at 10 IDs so a payload with hundreds of
+// bad IDs doesn't bloat the error response.
 func formatMissingIDs(ids []string) string {
 	const cap = 10
 	if len(ids) <= cap {
@@ -118,6 +118,15 @@ func (h *UniversityHandler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response.Success(w, http.StatusOK, pagination.ItemsResponse[UniversitySearchResult]{Items: items})
+}
+
+func (h *UniversityHandler) Stats(w http.ResponseWriter, r *http.Request) {
+	stats, err := h.universityService.Stats(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+	response.Success(w, http.StatusOK, stats)
 }
 
 func (h *UniversityHandler) Get(w http.ResponseWriter, r *http.Request) {

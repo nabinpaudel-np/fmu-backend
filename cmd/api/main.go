@@ -54,7 +54,7 @@ func main() {
 	tokenSvc := token.NewTokenService(tokenRepo, cfg)
 	oauthSvc := oauth.NewOAuthService(cfg)
 	authSvc := auth.NewAuthService(cfg, userSvc, tokenSvc, oauthSvc)
-	authHandler := auth.NewAuthHandler(authSvc)
+	authHandler := auth.NewAuthHandler(authSvc, cfg)
 
 	authMW := auth.AuthMiddleware(cfg)
 	adminMW := auth.RequireRole(auth.RoleAdmin)
@@ -66,6 +66,11 @@ func main() {
 	r := chi.NewRouter()
 
 	origins := splitAndTrim(cfg.AllowedOrigins, ",")
+	for _, o := range origins {
+		if o == "*" {
+			log.Fatal("CORS: '*' is not allowed in ALLOWED_ORIGINS when cookies are used (AllowCredentials: true)")
+		}
+	}
 	if len(origins) == 0 {
 		log.Println("CORS: ALLOWED_ORIGINS not set — cross-origin requests will be blocked")
 	}
@@ -73,11 +78,11 @@ func main() {
 		AllowedOrigins:   origins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Requested-With"},
-		AllowCredentials: false,
+		AllowCredentials: true,
 		MaxAge:           300,
 	}))
 
-	auth.RegisterRoutes(r, authHandler)
+	auth.RegisterRoutes(r, authHandler, authMW)
 	university.RegisterRoutes(r, universityHandler, authMW, adminMW)
 
 	server := &http.Server{

@@ -136,6 +136,13 @@ type UniversitySearchResult struct {
 	Logo         string `json:"logo"`
 }
 
+type StatsResponse struct {
+	TotalUniversities int64 `json:"total_universities" example:"247"`
+	TotalCountries    int64 `json:"total_countries" example:"12"`
+	TotalFeatured     int64 `json:"total_featured" example:"18"`
+	TotalPopular      int64 `json:"total_popular" example:"24"`
+}
+
 type CreateUniversityResponse struct {
 	ID                       string    `json:"id"`
 	Name                     string    `json:"name"`

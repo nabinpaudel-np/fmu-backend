@@ -26,7 +26,11 @@ type Config struct {
 
 	AllowedOrigins string `env:"ALLOWED_ORIGINS" envDefault:""`
 
-	FrontendURL string `env:"FRONTEND_URL" envDefault:"http://localhost:3001"`
+	CookieDomain   string `env:"COOKIE_DOMAIN" envDefault:""`
+	CookieSecure   bool   `env:"COOKIE_SECURE" envDefault:"false"`
+	CookieSameSite string `env:"COOKIE_SAME_SITE" envDefault:"lax"`
+
+	FrontendURL string `env:"FRONTEND_URL" envDefault:"http://localhost:3000"`
 }
 
 func Load() (*Config, error) {
