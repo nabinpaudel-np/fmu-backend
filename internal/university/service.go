@@ -16,6 +16,7 @@ type UniversityService interface {
 	Create(ctx context.Context, req *CreateUniversityRequest) (*CreateUniversityResponse, error)
 	Get(ctx context.Context, q pagination.Query, f Filters) ([]UniversityListItem, int64, error)
 	GetByID(ctx context.Context, id string) (*UniversityDetailResponse, error)
+	Search(ctx context.Context, q string) ([]UniversitySearchResult, error)
 	GetMajors(ctx context.Context) ([]MajorResponse, error)
 	GetDegreeLevels(ctx context.Context) ([]DegreeLevelResponse, error)
 	GetStudyFormats(ctx context.Context) ([]StudyFormatResponse, error)
@@ -180,6 +181,19 @@ func (s *universityService) GetSupportServices(ctx context.Context) ([]SupportSe
 		out[i] = SupportServiceResponse{ID: row.ID, Name: row.Name}
 	}
 	return out, nil
+}
+
+func (s *universityService) Search(ctx context.Context, q string) ([]UniversitySearchResult, error) {
+	rows, err := s.repo.Search(ctx, q)
+	if err != nil {
+		log.Default().Printf("search universities q=%q: %v", q, err)
+		return nil, err
+	}
+	items := make([]UniversitySearchResult, len(rows))
+	for i, row := range rows {
+		items[i] = toUniversitySearchResult(row)
+	}
+	return items, nil
 }
 
 func (s *universityService) GetAllLookups(ctx context.Context) (*AllLookupsResponse, error) {

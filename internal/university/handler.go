@@ -101,6 +101,25 @@ func (h *UniversityHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	response.Success(w, http.StatusOK, detail)
 }
 
+func (h *UniversityHandler) Search(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		response.Error(w, http.StatusBadRequest, "query parameter 'q' is required")
+		return
+	}
+	if len(q) > 200 {
+		response.Error(w, http.StatusBadRequest, "query too long")
+		return
+	}
+
+	items, err := h.universityService.Search(r.Context(), q)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+	response.Success(w, http.StatusOK, pagination.ItemsResponse[UniversitySearchResult]{Items: items})
+}
+
 func (h *UniversityHandler) Get(w http.ResponseWriter, r *http.Request) {
 	q := pagination.Parse(r)
 	filters := ParseFilters(r.URL.Query())

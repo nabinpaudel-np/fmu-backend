@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/cors"
 	"github.com/joho/godotenv"
 
 	"fmu-backend/internal/auth"
@@ -63,6 +64,19 @@ func main() {
 	universityHandler := university.NewUniversityHandler(universitySvc)
 
 	r := chi.NewRouter()
+
+	origins := splitAndTrim(cfg.AllowedOrigins, ",")
+	if len(origins) == 0 {
+		log.Println("CORS: ALLOWED_ORIGINS not set — cross-origin requests will be blocked")
+	}
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   origins,
+		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Requested-With"},
+		AllowCredentials: false,
+		MaxAge:           300,
+	}))
+
 	auth.RegisterRoutes(r, authHandler)
 	university.RegisterRoutes(r, universityHandler, authMW, adminMW)
 
@@ -75,4 +89,15 @@ func main() {
 	if err := server.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func splitAndTrim(s, sep string) []string {
+	parts := strings.Split(s, sep)
+	out := parts[:0]
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }

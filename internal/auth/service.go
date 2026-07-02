@@ -2,11 +2,13 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"fmu-backend/internal/config"
 	"fmu-backend/internal/errs"
 	"fmu-backend/internal/oauth"
 	"fmu-backend/internal/token"
 	"fmu-backend/internal/user"
+	"net/url"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -17,6 +19,7 @@ type AuthService interface {
 	Refresh(ctx context.Context, req *RefreshRequest, userAgent string) (*RefreshResponse, error)
 	GoogleLogin(ctx context.Context, code string, userAgent string) (*LoginResponse, error)
 	GetGoogleAuthURL() string
+	BuildGoogleCallbackURL(res *LoginResponse) string
 	Logout(ctx context.Context, refreshToken string) error
 }
 
@@ -142,6 +145,16 @@ func (s *authService) Refresh(ctx context.Context, req *RefreshRequest, userAgen
 
 func (s *authService) GetGoogleAuthURL() string {
 	return s.oauthService.GetGoogleAuthURL()
+}
+
+func (s *authService) BuildGoogleCallbackURL(res *LoginResponse) string {
+	return fmt.Sprintf(
+		"%s/auth/callback?access_token=%s&refresh_token=%s&return_to=%s",
+		s.cfg.FrontendURL,
+		url.QueryEscape(res.AccessToken),
+		url.QueryEscape(res.RefreshToken),
+		url.QueryEscape("/"),
+	)
 }
 
 func (s *authService) GoogleLogin(ctx context.Context, code string, userAgent string) (*LoginResponse, error) {

@@ -536,6 +536,56 @@ curl 'http://localhost:3000/api/v1/universities?institution_type=private-nonprof
 
 ---
 
+### GET `/api/v1/universities/search`
+
+Typo-tolerant search across `name`, `city`, `state`, `country`, and `full_location`. Backed by Postgres `pg_trgm` similarity + GIN trigram indexes; results are ranked by similarity score and capped at 50.
+
+**Auth:** public
+
+**Query params:**
+
+| Param | Type   | Required | Notes                                                                                |
+|-------|--------|----------|--------------------------------------------------------------------------------------|
+| `q`   | string  | yes      | Free-text search term. Min length 1 after trim. Max 200 chars. Typo-friendly.        |
+
+**Response:** `200 OK`
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "6ead1892-d71b-4966-9ce0-d2419db9cca6",
+        "name": "Massachusetts Institute of Technology",
+        "slug": "mit",
+        "country": "US",
+        "state": "MA",
+        "city": "Cambridge",
+        "full_location": "Cambridge, MA, US",
+        "logo": "https://cdn.example.com/mit-logo.png"
+      }
+    ]
+  }
+}
+```
+
+**Errors:**
+
+| Status | Cause                                    | Body                                          |
+|--------|------------------------------------------|-----------------------------------------------|
+| `400`  | `q` missing or empty                     | `{"success": false, "error": "query parameter 'q' is required"}` |
+| `400`  | `q` longer than 200 chars                | `{"success": false, "error": "query too long"}`                   |
+
+**Examples**
+```
+GET /api/v1/universities/search?q=cambrige
+  → returns "Cambridge University" and other near-spelling matches
+GET /api/v1/universities/search?q=mit
+  → returns MIT, Midwestern Institute of Technology, universities with "MA" in location
+```
+
+> The same substring hits the GIN trigram index — no full table scans. Threshold is `similarity(...) > 0.2`, tunable in `internal/db/queries/universities.sql`.
+
 ### GET `/api/v1/universities/{id}`
 
 Get one university's full details, including all lookup-table references (majors, degree levels, study formats, etc.).
@@ -840,4 +890,4 @@ curl http://localhost:3000/api/v1/universities/lookups
 
 ## CORS
 
-CORS is not currently configured on the backend. If the frontend is served from a different origin than the API, you'll need to add CORS middleware (e.g. `chi/middleware.CORS` with allowed origins) before this works in a browser.
+CORS is configured via the `ALLOWED_ORIGINS` env var (comma-separated list of origins, e.g. `ALLOWED_ORIGINS=http://localhost:3001`). Defaults to empty, which blocks all cross-origin requests. The middleware is mounted at the top of the chi router in `cmd/api/main.go` (`github.com/go-chi/cors`), so preflight `OPTIONS` requests are handled before any auth middleware runs. Credentials are not currently sent cross-origin; all auth endpoints return tokens in the JSON response body. If cookie-based auth is added later, set `AllowCredentials: true` in `cmd/api/main.go` and ensure the origin list does not include `*`.

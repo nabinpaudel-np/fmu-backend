@@ -28,6 +28,7 @@ type UniversityRepository interface {
 	Create(ctx context.Context, params sqlc.CreateUniversityParams, ids lookupIDs) (sqlc.University, error)
 	Get(ctx context.Context, q pagination.Query, f Filters) ([]sqlc.University, int64, error)
 	GetByID(ctx context.Context, id string) (sqlc.University, error)
+	Search(ctx context.Context, q string) ([]sqlc.SearchUniversitiesRow, error)
 	GetUniversityDegreeLevels(ctx context.Context, universityID string) ([]sqlc.DegreeLevel, error)
 	GetUniversityMajors(ctx context.Context, universityID string) ([]sqlc.Major, error)
 	GetUniversityStudyFormats(ctx context.Context, universityID string) ([]sqlc.StudyFormat, error)
@@ -47,8 +48,19 @@ type universityRepository struct {
 	pool    *pgxpool.Pool
 }
 
+// maxSearchResults caps the payload for the /universities/search dropdown —
+// search has no filters to combine, so a hard cap keeps responses snappy.
+const maxSearchResults = 50
+
 func NewUniversityRepository(queries *sqlc.Queries, pool *pgxpool.Pool) UniversityRepository {
 	return &universityRepository{queries: queries, pool: pool}
+}
+
+func (r *universityRepository) Search(ctx context.Context, q string) ([]sqlc.SearchUniversitiesRow, error) {
+	return r.queries.SearchUniversities(ctx, sqlc.SearchUniversitiesParams{
+		Similarity: q,
+		Limit:      int32(maxSearchResults),
+	})
 }
 
 func (r *universityRepository) Create(ctx context.Context, params sqlc.CreateUniversityParams, ids lookupIDs) (sqlc.University, error) {
