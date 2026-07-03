@@ -14,7 +14,6 @@ func RegisterRoutes(
 ) {
 	r.With(authMW, adminMW).Post("/api/v1/universities", h.Create)
 
-	// Static routes go before /{id} so chi resolves them first.
 	r.Get("/api/v1/universities/search", h.Search)
 	r.With(authMW, adminMW).Get("/api/v1/universities/stats", h.Stats)
 	r.Get("/api/v1/universities/majors", h.GetMajors)
@@ -25,7 +24,6 @@ func RegisterRoutes(
 	r.Get("/api/v1/universities/support-services", h.GetSupportServices)
 	r.Get("/api/v1/universities/lookups", h.GetAllLookups)
 
-	// /{id} last so the static routes above win.
 	r.Get("/api/v1/universities", h.Get)
 	r.Get("/api/v1/universities/{id}", h.GetByID)
 }
