@@ -31,6 +31,16 @@ type Config struct {
 	CookieSameSite string `env:"COOKIE_SAME_SITE" envDefault:"lax"`
 
 	FrontendURL string `env:"FRONTEND_URL" envDefault:"http://localhost:3000"`
+
+	Cloudinary CloudinaryConfig `envPrefix:"CLOUDINARY_"`
+}
+
+type CloudinaryConfig struct {
+	CloudName      string `env:"CLOUD_NAME"`
+	APIKey         string `env:"API_KEY"`
+	APISecret      string `env:"API_SECRET"`
+	Folder         string `env:"FOLDER" envDefault:"fmu"`
+	SecureDelivery bool   `env:"SECURE_DELIVERY" envDefault:"true"`
 }
 
 func Load() (*Config, error) {

@@ -11,12 +11,14 @@ import (
 	"github.com/joho/godotenv"
 
 	"fmu-backend/internal/auth"
+	"fmu-backend/internal/cloudinary"
 	"fmu-backend/internal/config"
 	"fmu-backend/internal/db"
 	"fmu-backend/internal/db/sqlc"
 	"fmu-backend/internal/oauth"
 	"fmu-backend/internal/token"
 	"fmu-backend/internal/university"
+	"fmu-backend/internal/uploads"
 	"fmu-backend/internal/user"
 )
 
@@ -63,6 +65,20 @@ func main() {
 	universitySvc := university.NewUniversityService(universityRepo)
 	universityHandler := university.NewUniversityHandler(universitySvc)
 
+	cld, err := cloudinary.New(cloudinary.Config{
+		CloudName:      cfg.Cloudinary.CloudName,
+		APIKey:         cfg.Cloudinary.APIKey,
+		APISecret:      cfg.Cloudinary.APISecret,
+		Folder:         cfg.Cloudinary.Folder,
+		AppEnv:         cfg.AppEnv,
+		SecureDelivery: cfg.Cloudinary.SecureDelivery,
+	})
+	if err != nil {
+		log.Fatalf("cloudinary init failed: %v", err)
+	}
+	uploadsSvc := uploads.NewService(cld)
+	uploadsHandler := uploads.NewHandler(uploadsSvc)
+
 	r := chi.NewRouter()
 
 	origins := splitAndTrim(cfg.AllowedOrigins, ",")
@@ -84,6 +100,7 @@ func main() {
 
 	auth.RegisterRoutes(r, authHandler, authMW)
 	university.RegisterRoutes(r, universityHandler, authMW, adminMW)
+	uploads.RegisterRoutes(r, uploadsHandler, authMW, adminMW)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,

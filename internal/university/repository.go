@@ -290,8 +290,10 @@ func buildUniversitiesWhere(f Filters) (string, []any) {
 	addExists("university_special_affiliations", "special_affiliations", "special_affiliation_id", f.SpecialAffiliations)
 	addExists("university_athletics", "athletics", "athletic_id", f.Athletics)
 
-	// Multiple has_X=true are AND-ed; within a single lookup param it's ANY
-	// (handled by addExists above).
+	// All filter clauses are OR-ed: a row matches if any one filter is true.
+	// Within a multi-value lookup param, addExists still uses ANY (OR over
+	// values); each HasSupportService key also becomes its own EXISTS clause
+	// here, so multi-select services also OR (any-of).
 	for _, name := range sortedSupportServiceNames(f.HasSupportService) {
 		args = append(args, name)
 		clauses = append(clauses, fmt.Sprintf(
@@ -303,7 +305,7 @@ func buildUniversitiesWhere(f Filters) (string, []any) {
 	if len(clauses) == 0 {
 		return "", nil
 	}
-	return " AND " + strings.Join(clauses, " AND "), args
+	return " AND (" + strings.Join(clauses, " OR ") + ")", args
 }
 
 // Sorted: identical Filters must produce identical param order so
