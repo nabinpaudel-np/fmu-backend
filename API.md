@@ -829,8 +829,8 @@ Create a new university.
   "full_location": "Cambridge, MA, US",
   "zipcode": "02139",
   "contact_phone": "+1-617-253-1000",
-  "cover_image": "https://cdn.example.com/mit-cover.jpg",
-  "logo": "https://cdn.example.com/mit-logo.png",
+  "cover_image": "https://res.cloudinary.com/<cloud>/image/upload/v1234567890/fmu/development/cover/abc123.jpg",
+  "logo": "https://res.cloudinary.com/<cloud>/image/upload/v1234567890/fmu/development/logo/xyz789.png",
   "in_state_tuition": 57590,
   "out_of_state_tuition": 57590,
   "international_tuition": 57590,
@@ -850,8 +850,8 @@ Create a new university.
   "founded_year": 1861,
   "campus_size": "168 acres",
   "gallery_images": [
-    "https://cdn.example.com/mit-1.jpg",
-    "https://cdn.example.com/mit-2.jpg"
+    "https://res.cloudinary.com/<cloud>/image/upload/v1234567890/fmu/development/gallery/img1.jpg",
+    "https://res.cloudinary.com/<cloud>/image/upload/v1234567890/fmu/development/gallery/img2.jpg"
   ],
   "is_popular": true,
   "is_featured": true,
@@ -881,7 +881,7 @@ Create a new university.
 - `major_ids` (array, min 1, each item must be a valid UUID)
 
 **Optional, validated if present:**
-- `cover_image`, `logo`, `gallery_images[]` — must be valid URLs
+- `cover_image`, `logo`, `gallery_images[]` — must be valid URLs. The expected workflow is to upload first via `POST /api/v1/uploads/sign` (browser → Cloudinary direct), then pass the returned `secure_url` here. See [Uploads endpoints](#uploads-endpoints) for the two-step flow.
 - `in_state_tuition`, `out_of_state_tuition`, `international_tuition`, `tuition_min`, `tuition_max` — must be ≥ 0
 - `acceptance_rate` — between 0 and 100 (percentage)
 - `avg_high_school_gpa` — between 0 and 5
@@ -914,6 +914,134 @@ Create a new university.
   ```json
   { "success": false, "error": "university with this slug already exists (slug=mit)" }
   ```
+
+---
+
+## Uploads endpoints
+
+Image storage is backed by Cloudinary (free plan — no credit card required, 25 monthly credits, 25 GB storage). The browser uploads files directly to Cloudinary; the backend never sees the bytes. Admins must be authenticated and hold the `admin` role for both endpoints.
+
+### End-to-end flow
+
+```
+┌────────────┐  1. POST /api/v1/uploads/sign       ┌──────────────┐
+│            │  ─────────────────────────────────▶  │              │
+│  Browser   │     {purpose: "logo"}                │  FMU backend │
+│            │  ◀─────────────────────────────────  │              │
+│            │     {signature, api_key,             └──────────────┘
+│            │      timestamp, cloud_name,                       │
+│            │      folder}                                      ▼
+│            │                                          ┌──────────────┐
+│            │  2. POST api.cloudinary.com/v1_1/...    │              │
+│            │     multipart/form-data:               │  Cloudinary  │
+│            │     file, api_key, timestamp,          │  (storage)   │
+│            │     signature, folder                  │              │
+│            │  ◀────────────────────────────────────  │              │
+│            │     {secure_url, public_id, ...}        └──────────────┘
+│            │                                                     │
+│            │  3. POST /api/v1/universities                       │
+│            │     { ..., logo: secure_url, cover_image: ... }     │
+└────────────┘                                                     │
+```
+
+Each purpose (`logo`, `cover`, `gallery`) maps to a Cloudinary folder: `fmu/{APP_ENV}/{purpose}/`. Files auto-receive a unique filename on Cloudinary's side; overwrite is disabled.
+
+### POST `/api/v1/uploads/sign`
+
+Returns a one-shot signed-upload payload. Send it (along with the file) directly to Cloudinary — the backend never proxies the bytes.
+
+**Auth:** admin only.
+
+**Request body:**
+```json
+{ "purpose": "logo" }
+```
+
+`purpose` must be one of `logo`, `cover`, `gallery`.
+
+**Response:** `200 OK`
+```json
+{
+  "success": true,
+  "data": {
+    "cloud_name": "your-cloud-name",
+    "api_key": "123456789012345",
+    "timestamp": 1715000000,
+    "signature": "abc123...",
+    "folder": "fmu/development/logo"
+  }
+}
+```
+
+**Then from the browser, POST multipart to:**
+```
+POST https://api.cloudinary.com/v1_1/{cloud_name}/image/upload
+Content-Type: multipart/form-data
+
+file=@<binary>          # the image
+api_key=<api_key>       # from /sign response
+timestamp=<timestamp>   # from /sign response
+signature=<signature>   # from /sign response
+folder=<folder>         # from /sign response
+```
+
+Cloudinary responds with:
+```json
+{
+  "secure_url": "https://res.cloudinary.com/.../image/upload/v1234/fmu/development/logo/abc.jpg",
+  "public_id": "fmu/development/logo/abc",
+  "width": 800, "height": 800, "format": "jpg", "bytes": 12345,
+  ...
+}
+```
+
+Pass `secure_url` into the corresponding field on `POST /api/v1/universities`.
+
+> Delivery-side transforms (`f_auto`, `q_auto`) should be applied via URL, not signed `eager` — eager transformations count against the 25 credits/month free tier.
+
+**Errors:**
+- `400` — `purpose` missing or not in allowlist
+- `401` — missing/invalid session cookie
+- `403` — role is not `admin`
+- `500` — Cloudinary client not configured (missing `CLOUDINARY_*` env vars in non-dev)
+
+### POST `/api/v1/uploads/image`
+
+Optional server-side fallback for clients that cannot reach Cloudinary directly. Streams a multipart `file` to Cloudinary from the backend.
+
+**Auth:** admin only.
+
+**Query parameters:**
+- `purpose` (required) — one of `logo`, `cover`, `gallery`
+
+**Request body:** `multipart/form-data` with a single `file` field. Max 10 MiB. Allowlisted MIMEs: `image/jpeg`, `image/png`, `image/webp`, `image/gif`. Mime is detected from the first 512 bytes (form headers are not trusted).
+
+**Response:** `201 Created`
+```json
+{
+  "success": true,
+  "data": {
+    "secure_url": "https://res.cloudinary.com/...",
+    "url": "http://res.cloudinary.com/...",
+    "public_id": "fmu/development/logo/abc",
+    "width": 800,
+    "height": 800,
+    "format": "jpg",
+    "bytes": 12345
+  }
+}
+```
+
+**Errors:**
+- `400` — missing/invalid `purpose`, or no `file` field
+- `413` — file exceeds 10 MiB
+- `415` — mime type not in allowlist
+- `401` / `403` — admin-only
+- `502` — Cloudinary rejected the upload
+
+### Storage / deletion
+
+Cloudinary assets are referenced by URL in the database, not by FK. There is no automatic cleanup yet — when an `Update /universities/{id}` endpoint lands, replacing a logo/cover will best-effort `destroy` the previous Cloudinary public id in a goroutine (log-and-continue; never block the DB write on a Cloudinary outage).
 
 ---
 
