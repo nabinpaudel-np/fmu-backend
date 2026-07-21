@@ -11,11 +11,15 @@ import (
 	"github.com/joho/godotenv"
 
 	"fmu-backend/internal/auth"
+	"fmu-backend/internal/claim"
 	"fmu-backend/internal/cloudinary"
+	"fmu-backend/internal/college"
 	"fmu-backend/internal/config"
 	"fmu-backend/internal/db"
 	"fmu-backend/internal/db/sqlc"
+	"fmu-backend/internal/favorites"
 	"fmu-backend/internal/oauth"
+	"fmu-backend/internal/supabase"
 	"fmu-backend/internal/token"
 	"fmu-backend/internal/university"
 	"fmu-backend/internal/uploads"
@@ -59,11 +63,27 @@ func main() {
 	authHandler := auth.NewAuthHandler(authSvc, cfg)
 
 	authMW := auth.AuthMiddleware(cfg)
+	optionalAuthMW := auth.OptionalAuthMiddleware(cfg)
 	adminMW := auth.RequireRole(auth.RoleAdmin)
+	adminOrRepMW := auth.RequireRole(auth.RoleAdmin, auth.RoleRepresentative)
+	studentMW := auth.RequireRole(auth.RoleStudent)
+
+	favoritesRepo := favorites.NewRepository(queries, pool)
 
 	universityRepo := university.NewUniversityRepository(queries, pool)
 	universitySvc := university.NewUniversityService(universityRepo)
-	universityHandler := university.NewUniversityHandler(universitySvc)
+	universityHandler := university.NewUniversityHandler(universitySvc, favoritesRepo)
+
+	collegeRepo := college.NewCollegeRepository(queries, pool)
+	collegeSvc := college.NewCollegeService(collegeRepo)
+	collegeHandler := college.NewCollegeHandler(collegeSvc, favoritesRepo)
+
+	favoritesSvc := favorites.NewService(favoritesRepo, universitySvc, collegeSvc)
+	favoritesHandler := favorites.NewHandler(favoritesSvc)
+
+	claimRepo := claim.NewClaimRepository(queries)
+	claimSvc := claim.NewClaimService(claimRepo, claim.NewUniversityExisterAdapter(universitySvc), userSvc)
+	claimHandler := claim.NewClaimHandler(claimSvc)
 
 	cld, err := cloudinary.New(cloudinary.Config{
 		CloudName:      cfg.Cloudinary.CloudName,
@@ -76,7 +96,16 @@ func main() {
 	if err != nil {
 		log.Fatalf("cloudinary init failed: %v", err)
 	}
-	uploadsSvc := uploads.NewService(cld)
+
+	supa, err := supabase.New(supabase.Config{
+		URL:            cfg.Supabase.URL,
+		ServiceRoleKey: cfg.Supabase.ServiceRoleKey,
+	})
+	if err != nil {
+		log.Fatalf("supabase init failed: %v", err)
+	}
+
+	uploadsSvc := uploads.NewService(cld, supa, cfg.Supabase.DocsBucket)
 	uploadsHandler := uploads.NewHandler(uploadsSvc)
 
 	r := chi.NewRouter()
@@ -99,8 +128,11 @@ func main() {
 	}))
 
 	auth.RegisterRoutes(r, authHandler, authMW)
-	university.RegisterRoutes(r, universityHandler, authMW, adminMW)
-	uploads.RegisterRoutes(r, uploadsHandler, authMW, adminMW)
+	university.RegisterRoutes(r, universityHandler, authMW, adminMW, optionalAuthMW)
+	uploads.RegisterRoutes(r, uploadsHandler, authMW, adminOrRepMW)
+	college.RegisterRoutes(r, collegeHandler, authMW, adminOrRepMW, optionalAuthMW)
+	favorites.RegisterRoutes(r, favoritesHandler, authMW, studentMW)
+	claim.RegisterRoutes(r, claimHandler, authMW, adminMW, optionalAuthMW)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,

@@ -26,6 +26,7 @@ type lookupIDs struct {
 
 type UniversityRepository interface {
 	Create(ctx context.Context, params sqlc.CreateUniversityParams, ids lookupIDs) (sqlc.University, error)
+	Patch(ctx context.Context, id string, req *PatchUniversityRequest) (sqlc.University, error)
 	Get(ctx context.Context, q pagination.Query, f Filters) ([]sqlc.University, int64, error)
 	GetByID(ctx context.Context, id string) (sqlc.University, error)
 	Search(ctx context.Context, q string) ([]sqlc.SearchUniversitiesRow, error)
@@ -328,6 +329,301 @@ func sortedSupportServiceNames(m map[string]bool) []string {
 
 func (r *universityRepository) GetByID(ctx context.Context, id string) (sqlc.University, error) {
 	return r.queries.GetUniversityByID(ctx, id)
+}
+
+func (r *universityRepository) Patch(ctx context.Context, id string, req *PatchUniversityRequest) (sqlc.University, error) {
+	var err error
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return sqlc.University{}, err
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback(ctx)
+		}
+	}()
+
+	q := r.queries.WithTx(tx)
+
+	missing := map[string][]string{}
+	collectMissing := func(table string, ids []string, getExisting func(context.Context, []string) ([]string, error)) {
+		if len(ids) == 0 {
+			return
+		}
+		existing, err := getExisting(ctx, ids)
+		if err != nil {
+			return
+		}
+		if m := findMissing(existing, ids); len(m) > 0 {
+			missing[table] = m
+		}
+	}
+
+	if req.DegreeLevelIDs != nil {
+		collectMissing("degree_levels", *req.DegreeLevelIDs, q.GetExistingDegreeLevelIDs)
+	}
+	if req.MajorIDs != nil {
+		collectMissing("majors", *req.MajorIDs, q.GetExistingMajorIDs)
+	}
+	if req.StudyFormatIDs != nil {
+		collectMissing("study_formats", *req.StudyFormatIDs, q.GetExistingStudyFormatIDs)
+	}
+	if req.SpecialAffiliationIDs != nil {
+		collectMissing("special_affiliations", *req.SpecialAffiliationIDs, q.GetExistingSpecialAffiliationIDs)
+	}
+	if req.AthleticIDs != nil {
+		collectMissing("athletics", *req.AthleticIDs, q.GetExistingAthleticIDs)
+	}
+	if req.SupportServiceIDs != nil {
+		collectMissing("support_services", *req.SupportServiceIDs, q.GetExistingSupportServiceIDs)
+	}
+
+	if len(missing) > 0 {
+		return sqlc.University{}, &errs.InvalidReferencesError{References: missing}
+	}
+
+	sets := []string{}
+	args := []any{}
+
+	addSet := func(col string, val any) {
+		args = append(args, val)
+		sets = append(sets, fmt.Sprintf("%s = $%d", col, len(args)))
+	}
+
+	if req.Name != nil {
+		addSet("name", *req.Name)
+	}
+	if req.Slug != nil {
+		addSet("slug", *req.Slug)
+	}
+	if req.Overview != nil {
+		addSet("overview", *req.Overview)
+	}
+	if req.Excerpt != nil {
+		addSet("excerpt", *req.Excerpt)
+	}
+	if req.Country != nil {
+		addSet("country", *req.Country)
+	}
+	if req.State != nil {
+		addSet("state", *req.State)
+	}
+	if req.City != nil {
+		addSet("city", *req.City)
+	}
+	if req.FullLocation != nil {
+		addSet("full_location", *req.FullLocation)
+	}
+	if req.CoverImage != nil {
+		addSet("cover_image", *req.CoverImage)
+	}
+	if req.Logo != nil {
+		addSet("logo", *req.Logo)
+	}
+	if req.InstitutionType != nil {
+		addSet("institution_type", *req.InstitutionType)
+	}
+	if req.CampusSetting != nil {
+		addSet("campus_setting", *req.CampusSetting)
+	}
+	if req.InStateTuition != nil {
+		addSet("in_state_tuition", nullableNumeric(*req.InStateTuition))
+	}
+	if req.OutOfStateTuition != nil {
+		addSet("out_of_state_tuition", nullableNumeric(*req.OutOfStateTuition))
+	}
+	if req.InternationalTuition != nil {
+		addSet("international_tuition", nullableNumeric(*req.InternationalTuition))
+	}
+	if req.NeedBasedAid != nil {
+		addSet("need_based_aid", *req.NeedBasedAid)
+	}
+	if req.MeritScholarships != nil {
+		addSet("merit_scholarships", *req.MeritScholarships)
+	}
+	if req.WorkStudy != nil {
+		addSet("work_study", *req.WorkStudy)
+	}
+	if req.NoApplicationFee != nil {
+		addSet("no_application_fee", *req.NoApplicationFee)
+	}
+	if req.AcceptanceRate != nil {
+		addSet("acceptance_rate", nullableNumeric(*req.AcceptanceRate))
+	}
+	if req.TestingPolicy != nil {
+		addSet("testing_policy", *req.TestingPolicy)
+	}
+	if req.SatRange != nil {
+		addSet("sat_range", *req.SatRange)
+	}
+	if req.ActRange != nil {
+		addSet("act_range", *req.ActRange)
+	}
+	if req.OnCampusHousing != nil {
+		addSet("on_campus_housing", *req.OnCampusHousing)
+	}
+	if req.FreshmenRequiredOnCampus != nil {
+		addSet("freshmen_required_on_campus", *req.FreshmenRequiredOnCampus)
+	}
+	if req.ContactEmail != nil {
+		addSet("contact_email", *req.ContactEmail)
+	}
+	if req.ContactPhone != nil {
+		addSet("contact_phone", *req.ContactPhone)
+	}
+	if req.Website != nil {
+		addSet("website", *req.Website)
+	}
+	if req.Zipcode != nil {
+		addSet("zipcode", *req.Zipcode)
+	}
+	if req.TuitionMin != nil {
+		addSet("tuition_min", *req.TuitionMin)
+	}
+	if req.TuitionMax != nil {
+		addSet("tuition_max", *req.TuitionMax)
+	}
+	if req.AvgHighSchoolGpa != nil {
+		addSet("avg_high_school_gpa", nullableNumeric(*req.AvgHighSchoolGpa))
+	}
+	if req.FoundedYear != nil {
+		addSet("founded_year", int16(*req.FoundedYear))
+	}
+	if req.CampusSize != nil {
+		addSet("campus_size", *req.CampusSize)
+	}
+	if req.GalleryImages != nil {
+		addSet("gallery_images", *req.GalleryImages)
+	}
+	if req.IsPopular != nil {
+		addSet("is_popular", *req.IsPopular)
+	}
+	if req.IsFeatured != nil {
+		addSet("is_featured", *req.IsFeatured)
+	}
+
+	sets = append(sets, "updated_at = now()")
+	args = append(args, id)
+	// RETURNING lists columns in scan order, not SELECT *. The ALTER TABLE ADD
+	// COLUMN migration appended fields after created_at/updated_at, so the
+	// physical column order no longer matches the schema.sql declaration.
+	sql := fmt.Sprintf("UPDATE universities SET %s WHERE id = $%d RETURNING id, name, slug, overview, excerpt, country, state, city, full_location, cover_image, logo, institution_type, campus_setting, in_state_tuition, out_of_state_tuition, international_tuition, need_based_aid, merit_scholarships, work_study, no_application_fee, acceptance_rate, testing_policy, sat_range, act_range, on_campus_housing, freshmen_required_on_campus, contact_email, contact_phone, website, zipcode, tuition_min, tuition_max, avg_high_school_gpa, founded_year, campus_size, gallery_images, is_popular, is_featured, created_at, updated_at",
+		strings.Join(sets, ", "), len(args))
+
+	var row sqlc.University
+	err = tx.QueryRow(ctx, sql, args...).Scan(
+		&row.ID, &row.Name, &row.Slug, &row.Overview, &row.Excerpt,
+		&row.Country, &row.State, &row.City, &row.FullLocation,
+		&row.CoverImage, &row.Logo,
+		&row.InstitutionType, &row.CampusSetting,
+		&row.InStateTuition, &row.OutOfStateTuition, &row.InternationalTuition,
+		&row.NeedBasedAid, &row.MeritScholarships, &row.WorkStudy, &row.NoApplicationFee,
+		&row.AcceptanceRate, &row.TestingPolicy, &row.SatRange, &row.ActRange,
+		&row.OnCampusHousing, &row.FreshmenRequiredOnCampus,
+		&row.ContactEmail, &row.ContactPhone, &row.Website,
+		&row.Zipcode, &row.TuitionMin, &row.TuitionMax, &row.AvgHighSchoolGpa,
+		&row.FoundedYear, &row.CampusSize, &row.GalleryImages,
+		&row.IsPopular, &row.IsFeatured,
+		&row.CreatedAt, &row.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return sqlc.University{}, errs.ErrNotFound
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && req.Slug != nil {
+			return sqlc.University{}, fmt.Errorf("%w (slug=%s)", errs.ErrUniversitySlugTaken, *req.Slug)
+		}
+		if errors.As(err, &pgErr) && pgErr.Code == "22P02" {
+			return sqlc.University{}, errs.ErrNotFound
+		}
+		return sqlc.University{}, err
+	}
+
+	replaceLookup := func(ids []string, deleteFn func(context.Context, string) error, insertFn func(context.Context, []string) error) error {
+		if err := deleteFn(ctx, id); err != nil {
+			return err
+		}
+		if len(ids) > 0 {
+			if err := insertFn(ctx, ids); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if req.DegreeLevelIDs != nil {
+		err = replaceLookup(*req.DegreeLevelIDs, q.DeleteUniversityDegreeLevels, func(ctx context.Context, ids []string) error {
+			return q.InsertUniversityDegreeLevels(ctx, sqlc.InsertUniversityDegreeLevelsParams{
+				UniversityID: row.ID,
+				Column2:      ids,
+			})
+		})
+		if err != nil {
+			return sqlc.University{}, err
+		}
+	}
+	if req.MajorIDs != nil {
+		err = replaceLookup(*req.MajorIDs, q.DeleteUniversityMajors, func(ctx context.Context, ids []string) error {
+			return q.InsertUniversityMajors(ctx, sqlc.InsertUniversityMajorsParams{
+				UniversityID: row.ID,
+				Column2:      ids,
+			})
+		})
+		if err != nil {
+			return sqlc.University{}, err
+		}
+	}
+	if req.StudyFormatIDs != nil {
+		err = replaceLookup(*req.StudyFormatIDs, q.DeleteUniversityStudyFormats, func(ctx context.Context, ids []string) error {
+			return q.InsertUniversityStudyFormats(ctx, sqlc.InsertUniversityStudyFormatsParams{
+				UniversityID: row.ID,
+				Column2:      ids,
+			})
+		})
+		if err != nil {
+			return sqlc.University{}, err
+		}
+	}
+	if req.SpecialAffiliationIDs != nil {
+		err = replaceLookup(*req.SpecialAffiliationIDs, q.DeleteUniversitySpecialAffiliations, func(ctx context.Context, ids []string) error {
+			return q.InsertUniversitySpecialAffiliations(ctx, sqlc.InsertUniversitySpecialAffiliationsParams{
+				UniversityID: row.ID,
+				Column2:      ids,
+			})
+		})
+		if err != nil {
+			return sqlc.University{}, err
+		}
+	}
+	if req.AthleticIDs != nil {
+		err = replaceLookup(*req.AthleticIDs, q.DeleteUniversityAthletics, func(ctx context.Context, ids []string) error {
+			return q.InsertUniversityAthletics(ctx, sqlc.InsertUniversityAthleticsParams{
+				UniversityID: row.ID,
+				Column2:      ids,
+			})
+		})
+		if err != nil {
+			return sqlc.University{}, err
+		}
+	}
+	if req.SupportServiceIDs != nil {
+		err = replaceLookup(*req.SupportServiceIDs, q.DeleteUniversitySupportServices, func(ctx context.Context, ids []string) error {
+			return q.InsertUniversitySupportServices(ctx, sqlc.InsertUniversitySupportServicesParams{
+				UniversityID: row.ID,
+				Column2:      ids,
+			})
+		})
+		if err != nil {
+			return sqlc.University{}, err
+		}
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return sqlc.University{}, err
+	}
+
+	return row, nil
 }
 
 func (r *universityRepository) Stats(ctx context.Context) (*UniversityStats, error) {

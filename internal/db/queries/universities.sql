@@ -81,6 +81,24 @@ SELECT COUNT(*) FROM universities;
 -- name: GetUniversityByID :one
 SELECT * FROM universities WHERE id = $1;
 
+-- name: DeleteUniversityDegreeLevels :exec
+DELETE FROM university_degree_levels WHERE university_id = $1;
+
+-- name: DeleteUniversityMajors :exec
+DELETE FROM university_majors WHERE university_id = $1;
+
+-- name: DeleteUniversityStudyFormats :exec
+DELETE FROM university_study_formats WHERE university_id = $1;
+
+-- name: DeleteUniversitySpecialAffiliations :exec
+DELETE FROM university_special_affiliations WHERE university_id = $1;
+
+-- name: DeleteUniversityAthletics :exec
+DELETE FROM university_athletics WHERE university_id = $1;
+
+-- name: DeleteUniversitySupportServices :exec
+DELETE FROM university_support_services WHERE university_id = $1;
+
 -- name: GetUniversityDegreeLevels :many
 SELECT dl.id, dl.name
 FROM degree_levels dl

@@ -72,7 +72,7 @@ func (s *authService) Login(ctx context.Context, req *LoginRequest, userAgent st
 		return nil, errs.ErrInvalidCredentials
 	}
 
-	res, err := s.buildLoginResponse(ctx, existing.ID, existing.Email, existing.Role, existing.Avatar, existing.FullName, userAgent)
+	res, err := s.buildLoginResponse(ctx, existing.ID, existing.Email, existing.Role, existing.RepresentativeUniversityID, existing.Avatar, existing.FullName, userAgent)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +99,11 @@ func (s *authService) Refresh(ctx context.Context, refreshToken string, userAgen
 		return nil, errs.ErrUserNotFound
 	}
 
-	accessToken, err := s.tokenService.CreateAccessToken(u.ID, u.Email, u.Role)
+	repUniID := ""
+	if u.RepresentativeUniversityID != nil {
+		repUniID = *u.RepresentativeUniversityID
+	}
+	accessToken, err := s.tokenService.CreateAccessToken(u.ID, u.Email, u.Role, repUniID)
 	if err != nil {
 		return nil, errs.ErrInternalServer
 	}
@@ -115,12 +119,14 @@ func (s *authService) Refresh(ctx context.Context, refreshToken string, userAgen
 	}
 
 	return &RefreshResponse{
-		AccessToken:  accessToken,
-		RefreshToken: newRefreshToken,
-		UserID:       u.ID,
-		FullName:     u.FullName,
-		Email:        u.Email,
-		Avatar:       avatar,
+		AccessToken:                 accessToken,
+		RefreshToken:                newRefreshToken,
+		UserID:                      u.ID,
+		FullName:                    u.FullName,
+		Email:                       u.Email,
+		Avatar:                      avatar,
+		Role:                        u.Role,
+		RepresentativeUniversityID:  repUniID,
 	}, nil
 }
 
@@ -139,12 +145,18 @@ func (s *authService) Me(ctx context.Context, userID string) (*MeResponse, error
 		avatar = *u.Avatar
 	}
 
+	repUniID := ""
+	if u.RepresentativeUniversityID != nil {
+		repUniID = *u.RepresentativeUniversityID
+	}
+
 	return &MeResponse{
-		UserID:   u.ID,
-		FullName: u.FullName,
-		Email:    u.Email,
-		Avatar:   avatar,
-		Role:     u.Role,
+		UserID:                     u.ID,
+		FullName:                   u.FullName,
+		Email:                      u.Email,
+		Avatar:                     avatar,
+		Role:                       u.Role,
+		RepresentativeUniversityID: repUniID,
 	}, nil
 }
 
@@ -182,15 +194,19 @@ func (s *authService) GoogleLogin(ctx context.Context, code, codeVerifier string
 		}
 	}
 
-	res, err := s.buildLoginResponse(ctx, user.ID, user.Email, user.Role, user.Avatar, user.FullName, userAgent)
+	res, err := s.buildLoginResponse(ctx, user.ID, user.Email, user.Role, user.RepresentativeUniversityID, user.Avatar, user.FullName, userAgent)
 	if err != nil {
 		return nil, err
 	}
 	return res, nil
 }
 
-func (s *authService) buildLoginResponse(ctx context.Context, userID, email, role string, avatar *string, fullName, userAgent string) (*LoginResponse, error) {
-	accessToken, err := s.tokenService.CreateAccessToken(userID, email, role)
+func (s *authService) buildLoginResponse(ctx context.Context, userID, email, role string, repUniversityID *string, avatar *string, fullName, userAgent string) (*LoginResponse, error) {
+	repID := ""
+	if repUniversityID != nil {
+		repID = *repUniversityID
+	}
+	accessToken, err := s.tokenService.CreateAccessToken(userID, email, role, repID)
 	if err != nil {
 		return nil, errs.ErrInternalServer
 	}
@@ -206,12 +222,14 @@ func (s *authService) buildLoginResponse(ctx context.Context, userID, email, rol
 	}
 
 	return &LoginResponse{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		UserID:       userID,
-		FullName:     fullName,
-		Email:        email,
-		Avatar:       avatarStr,
+		AccessToken:                accessToken,
+		RefreshToken:               refreshToken,
+		UserID:                     userID,
+		FullName:                   fullName,
+		Email:                      email,
+		Avatar:                     avatarStr,
+		Role:                       role,
+		RepresentativeUniversityID: repID,
 	}, nil
 }
 

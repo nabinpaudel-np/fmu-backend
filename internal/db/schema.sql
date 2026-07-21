@@ -254,7 +254,8 @@ CREATE TABLE public.users (
     email_verified boolean DEFAULT false NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    role character varying(20) DEFAULT 'student'::character varying NOT NULL
+    role character varying(20) DEFAULT 'student'::character varying NOT NULL,
+    representative_university_id uuid
 );
 
 
@@ -639,4 +640,242 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260614000000'),
     ('20260614000001'),
     ('20260619000001'),
-    ('20260619000002');
+    ('20260619000002'),
+    ('20260630000001'),
+    ('20260630000002'),
+    ('20260701000001'),
+    ('20260706000001'),
+    ('20260719000001'),
+    ('20260720000001'),
+    ('20260720000002');
+
+--
+-- Name: colleges; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.colleges (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    name character varying(255) NOT NULL,
+    slug character varying(255) NOT NULL,
+    university_id uuid NOT NULL,
+    overview text NOT NULL,
+    country character varying(100),
+    state character varying(100),
+    city character varying(100),
+    full_location character varying(255),
+    logo character varying(500),
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: colleges colleges_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.colleges
+    ADD CONSTRAINT colleges_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: colleges colleges_slug_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.colleges
+    ADD CONSTRAINT colleges_slug_key UNIQUE (slug);
+
+
+--
+-- Name: colleges colleges_university_id_fkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.colleges
+    ADD CONSTRAINT colleges_university_id_fkey FOREIGN KEY (university_id) REFERENCES public.universities(id);
+
+
+--
+-- Name: idx_colleges_university_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_colleges_university_id ON public.colleges USING btree (university_id);
+
+
+--
+-- Name: idx_colleges_name_trgm; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_colleges_name_trgm ON public.colleges USING gin (name gin_trgm_ops);
+
+
+--
+-- Name: university_favorites; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.university_favorites (
+    user_id uuid NOT NULL,
+    university_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: college_favorites; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.college_favorites (
+    user_id uuid NOT NULL,
+    college_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: university_favorites university_favorites_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.university_favorites
+    ADD CONSTRAINT university_favorites_pkey PRIMARY KEY (user_id, university_id);
+
+
+--
+-- Name: college_favorites college_favorites_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.college_favorites
+    ADD CONSTRAINT college_favorites_pkey PRIMARY KEY (user_id, college_id);
+
+
+--
+-- Name: university_favorites university_favorites_university_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.university_favorites
+    ADD CONSTRAINT university_favorites_university_id_fkey FOREIGN KEY (university_id) REFERENCES public.universities(id) ON DELETE CASCADE;
+
+
+--
+-- Name: university_favorites university_favorites_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.university_favorites
+    ADD CONSTRAINT university_favorites_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: college_favorites college_favorites_college_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.college_favorites
+    ADD CONSTRAINT college_favorites_college_id_fkey FOREIGN KEY (college_id) REFERENCES public.colleges(id) ON DELETE CASCADE;
+
+
+--
+-- Name: college_favorites college_favorites_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.college_favorites
+    ADD CONSTRAINT college_favorites_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: idx_university_favorites_user_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_university_favorites_user_created ON public.university_favorites USING btree (user_id, created_at DESC);
+
+
+--
+-- Name: idx_college_favorites_user_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_college_favorites_user_created ON public.college_favorites USING btree (user_id, created_at DESC);
+
+
+--
+-- Name: users users_representative_university_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_representative_university_id_key UNIQUE (representative_university_id);
+
+
+--
+-- Name: users users_representative_university_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_representative_university_id_fkey FOREIGN KEY (representative_university_id) REFERENCES public.universities(id) ON DELETE SET NULL;
+
+
+--
+-- Name: idx_users_representative_university_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_users_representative_university_id ON public.users USING btree (representative_university_id) WHERE representative_university_id IS NOT NULL;
+
+
+--
+-- Name: university_claims; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.university_claims (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    university_id uuid NOT NULL,
+    full_name character varying(255) NOT NULL,
+    work_email character varying(255) NOT NULL,
+    document_url character varying(500) NOT NULL,
+    status character varying(20) DEFAULT 'pending'::character varying NOT NULL,
+    reviewer_id uuid,
+    reviewed_at timestamp with time zone,
+    review_note text,
+    created_user_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT university_claims_status_check CHECK (status::text = ANY (ARRAY['pending'::character varying, 'approved'::character varying, 'rejected'::character varying]::text[]))
+);
+
+
+--
+-- Name: university_claims university_claims_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.university_claims
+    ADD CONSTRAINT university_claims_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: university_claims university_claims_university_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.university_claims
+    ADD CONSTRAINT university_claims_university_id_fkey FOREIGN KEY (university_id) REFERENCES public.universities(id) ON DELETE CASCADE;
+
+
+--
+-- Name: university_claims university_claims_reviewer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.university_claims
+    ADD CONSTRAINT university_claims_reviewer_id_fkey FOREIGN KEY (reviewer_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: university_claims university_claims_created_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.university_claims
+    ADD CONSTRAINT university_claims_created_user_id_fkey FOREIGN KEY (created_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: idx_university_claims_university_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_university_claims_university_id ON public.university_claims USING btree (university_id);
+
+
+--
+-- Name: idx_university_claims_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_university_claims_status ON public.university_claims USING btree (status, created_at DESC);

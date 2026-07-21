@@ -23,3 +23,14 @@ func ClaimsFromContext(ctx context.Context) (*token.AccessTokenClaims, error) {
 	}
 	return c, nil
 }
+
+// OptionalUserID returns the authenticated user's id when OptionalAuthMiddleware
+// (or AuthMiddleware) injected claims, otherwise ("", false). Use this on
+// endpoints that personalize responses without requiring auth.
+func OptionalUserID(ctx context.Context) (string, bool) {
+	c, ok := ctx.Value(userClaimsKey).(*token.AccessTokenClaims)
+	if !ok || c == nil {
+		return "", false
+	}
+	return c.UserID, true
+}

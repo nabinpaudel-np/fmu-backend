@@ -1,6 +1,7 @@
 package university
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,19 +10,52 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"fmu-backend/internal/auth"
 	"fmu-backend/internal/errs"
 	"fmu-backend/internal/pagination"
 	"fmu-backend/internal/response"
 	"fmu-backend/internal/validator"
 )
 
-type UniversityHandler struct {
-	universityService UniversityService
+// favoritesLookup is the minimal favorites dependency the public list/search
+// handlers need to stamp `is_favorited`. Defined inline so this package only
+// imports what it uses — favorites.Repository satisfies it implicitly.
+type favoritesLookup interface {
+	FavoritedUniversityIDs(ctx context.Context, userID string, ids []string) (map[string]struct{}, error)
 }
 
-func NewUniversityHandler(universityService UniversityService) *UniversityHandler {
+type UniversityHandler struct {
+	universityService UniversityService
+	favorites         favoritesLookup
+}
+
+func NewUniversityHandler(universityService UniversityService, favs favoritesLookup) *UniversityHandler {
 	return &UniversityHandler{
 		universityService: universityService,
+		favorites:         favs,
+	}
+}
+
+// stampFavorited sets IsFavorited on each item in-place. No-op for anonymous
+// requests (OptionalAuthMiddleware didn't inject claims) and on lookup errors
+// — the field defaults to false in both cases.
+func (h *UniversityHandler) stampFavorited(ctx context.Context, items []UniversityListItem) {
+	uid, ok := auth.OptionalUserID(ctx)
+	if !ok || len(items) == 0 {
+		return
+	}
+	ids := make([]string, len(items))
+	for i, it := range items {
+		ids[i] = it.ID
+	}
+	set, err := h.favorites.FavoritedUniversityIDs(ctx, uid, ids)
+	if err != nil {
+		return
+	}
+	for i := range items {
+		if _, ok := set[items[i].ID]; ok {
+			items[i].IsFavorited = true
+		}
 	}
 }
 
@@ -85,6 +119,50 @@ func (h *UniversityHandler) Create(w http.ResponseWriter, r *http.Request) {
 	response.Success(w, http.StatusCreated, res)
 }
 
+func (h *UniversityHandler) Patch(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	var req PatchUniversityRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := validator.Validate.Struct(&req); err != nil {
+		validationErrors := validator.GetValidationErrors(err)
+		response.ValidationError(w, http.StatusBadRequest, validationErrors)
+		return
+	}
+
+	res, err := h.universityService.Patch(r.Context(), id, &req)
+	if err != nil {
+		var refErr *errs.InvalidReferencesError
+		if errors.As(err, &refErr) {
+			details := make([]response.ErrorDetail, 0, len(refErr.References))
+			for resource, ids := range refErr.References {
+				details = append(details, response.ErrorDetail{
+					Field:   resourceField[resource],
+					Message: fmt.Sprintf("the following %s do not exist: [%s]", resource, formatMissingIDs(ids)),
+				})
+			}
+			response.ValidationError(w, http.StatusBadRequest, details)
+			return
+		}
+		if errors.Is(err, errs.ErrUniversitySlugTaken) {
+			response.Error(w, http.StatusConflict, err.Error())
+			return
+		}
+		if errors.Is(err, errs.ErrNotFound) {
+			response.Error(w, http.StatusNotFound, "university not found")
+			return
+		}
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+
+	response.Success(w, http.StatusOK, res)
+}
+
 func (h *UniversityHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
@@ -117,6 +195,21 @@ func (h *UniversityHandler) Search(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "something went wrong")
 		return
 	}
+
+	if uid, ok := auth.OptionalUserID(r.Context()); ok && len(items) > 0 {
+		ids := make([]string, len(items))
+		for i, it := range items {
+			ids[i] = it.ID
+		}
+		if set, err := h.favorites.FavoritedUniversityIDs(r.Context(), uid, ids); err == nil {
+			for i := range items {
+				if _, ok := set[items[i].ID]; ok {
+					items[i].IsFavorited = true
+				}
+			}
+		}
+	}
+
 	response.Success(w, http.StatusOK, pagination.ItemsResponse[UniversitySearchResult]{Items: items})
 }
 
@@ -138,6 +231,8 @@ func (h *UniversityHandler) Get(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "something went wrong")
 		return
 	}
+
+	h.stampFavorited(r.Context(), items)
 
 	response.Success(w, http.StatusOK, pagination.Response[UniversityListItem]{
 		Items: items,

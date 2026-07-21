@@ -33,6 +33,7 @@ type Config struct {
 	FrontendURL string `env:"FRONTEND_URL" envDefault:"http://localhost:3000"`
 
 	Cloudinary CloudinaryConfig `envPrefix:"CLOUDINARY_"`
+	Supabase   SupabaseConfig   `envPrefix:"SUPABASE_"`
 }
 
 type CloudinaryConfig struct {
@@ -41,6 +42,12 @@ type CloudinaryConfig struct {
 	APISecret      string `env:"API_SECRET"`
 	Folder         string `env:"FOLDER" envDefault:"fmu"`
 	SecureDelivery bool   `env:"SECURE_DELIVERY" envDefault:"true"`
+}
+
+type SupabaseConfig struct {
+	URL            string `env:"URL"`
+	ServiceRoleKey string `env:"SERVICE_ROLE_KEY"`
+	DocsBucket     string `env:"DOCS_BUCKET" envDefault:"documents"`
 }
 
 func Load() (*Config, error) {
