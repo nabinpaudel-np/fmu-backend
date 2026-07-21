@@ -88,6 +88,67 @@ type CreateUniversityRequest struct {
 	SupportServiceIDs     []string `json:"support_service_ids" validate:"omitempty,dive,uuid"`
 }
 
+// PatchUniversityRequest is the body for PATCH /universities/{id}. All fields
+// are optional — pointer types let us distinguish "omit" (no change) from
+// "send the zero value" (explicit update).
+type PatchUniversityRequest struct {
+	Name     *string `json:"name,omitempty"      validate:"omitempty,max=255"`
+	Slug     *string `json:"slug,omitempty"      validate:"omitempty,min=2,max=255"`
+	Overview *string `json:"overview,omitempty"`
+	Excerpt  *string `json:"excerpt,omitempty"   validate:"omitempty,max=500"`
+
+	Country      *string `json:"country,omitempty"       validate:"omitempty,max=100"`
+	State        *string `json:"state,omitempty"         validate:"omitempty,max=100"`
+	City         *string `json:"city,omitempty"          validate:"omitempty,max=100"`
+	FullLocation *string `json:"full_location,omitempty" validate:"omitempty,max=255"`
+	Zipcode      *string `json:"zipcode,omitempty"`
+
+	CoverImage *string `json:"cover_image,omitempty" validate:"omitempty,url"`
+	Logo       *string `json:"logo,omitempty"       validate:"omitempty,url"`
+
+	InstitutionType *string `json:"institution_type,omitempty" validate:"omitempty,max=50"`
+	CampusSetting   *string `json:"campus_setting,omitempty"   validate:"omitempty,max=50"`
+
+	InStateTuition       *float64 `json:"in_state_tuition,omitempty"       validate:"omitempty,gte=0"`
+	OutOfStateTuition    *float64 `json:"out_of_state_tuition,omitempty"    validate:"omitempty,gte=0"`
+	InternationalTuition *float64 `json:"international_tuition,omitempty" validate:"omitempty,gte=0"`
+	TuitionMin           *int32   `json:"tuition_min,omitempty"            validate:"omitempty,gte=0"`
+	TuitionMax           *int32   `json:"tuition_max,omitempty"            validate:"omitempty,gte=0"`
+
+	NeedBasedAid      *bool `json:"need_based_aid,omitempty"`
+	MeritScholarships *bool `json:"merit_scholarships,omitempty"`
+	WorkStudy         *bool `json:"work_study,omitempty"`
+	NoApplicationFee  *bool `json:"no_application_fee,omitempty"`
+
+	AcceptanceRate *float64 `json:"acceptance_rate,omitempty" validate:"omitempty,gte=0,lte=100"`
+	TestingPolicy  *string  `json:"testing_policy,omitempty"  validate:"omitempty,max=50"`
+	SatRange       *string  `json:"sat_range,omitempty"       validate:"omitempty,max=20"`
+	ActRange       *string  `json:"act_range,omitempty"       validate:"omitempty,max=20"`
+
+	OnCampusHousing          *bool `json:"on_campus_housing,omitempty"`
+	FreshmenRequiredOnCampus *bool `json:"freshmen_required_on_campus,omitempty"`
+
+	ContactEmail *string `json:"contact_email,omitempty" validate:"omitempty,email,max=255"`
+	ContactPhone *string `json:"contact_phone,omitempty" validate:"omitempty,max=50"`
+	Website      *string `json:"website,omitempty"       validate:"omitempty,url,max=500"`
+
+	AvgHighSchoolGpa *float64   `json:"avg_high_school_gpa,omitempty" validate:"omitempty,gte=0,lte=5"`
+	FoundedYear      *int32     `json:"founded_year,omitempty"        validate:"omitempty,gte=1000,lte=2100"`
+	CampusSize       *string    `json:"campus_size,omitempty"         validate:"omitempty,max=100"`
+	GalleryImages    *[]string  `json:"gallery_images,omitempty"      validate:"omitempty,dive,url"`
+	IsPopular        *bool      `json:"is_popular,omitempty"`
+	IsFeatured       *bool      `json:"is_featured,omitempty"`
+
+	// nil = leave existing associations untouched; non-nil (including [])
+	// = replace the entire association list.
+	DegreeLevelIDs        *[]string `json:"degree_level_ids,omitempty"        validate:"omitempty,dive,uuid"`
+	MajorIDs              *[]string `json:"major_ids,omitempty"              validate:"omitempty,dive,uuid"`
+	StudyFormatIDs        *[]string `json:"study_format_ids,omitempty"        validate:"omitempty,dive,uuid"`
+	SpecialAffiliationIDs *[]string `json:"special_affiliation_ids,omitempty" validate:"omitempty,dive,uuid"`
+	AthleticIDs           *[]string `json:"athletic_ids,omitempty"           validate:"omitempty,dive,uuid"`
+	SupportServiceIDs     *[]string `json:"support_service_ids,omitempty"     validate:"omitempty,dive,uuid"`
+}
+
 type AllLookupsResponse struct {
 	Majors              []MajorResponse              `json:"majors"`
 	DegreeLevels        []DegreeLevelResponse        `json:"degree_levels"`
@@ -113,6 +174,7 @@ type UniversityListItem struct {
 	AcceptanceRate  float64 `json:"acceptance_rate"`
 	IsPopular       bool    `json:"is_popular"`
 	IsFeatured      bool    `json:"is_featured"`
+	IsFavorited     bool    `json:"is_favorited"`
 }
 
 type UniversityDetailResponse struct {
@@ -134,6 +196,7 @@ type UniversitySearchResult struct {
 	City         string `json:"city"`
 	FullLocation string `json:"full_location"`
 	Logo         string `json:"logo"`
+	IsFavorited  bool   `json:"is_favorited"`
 }
 
 type StatsResponse struct {

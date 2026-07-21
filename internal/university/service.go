@@ -14,6 +14,7 @@ import (
 
 type UniversityService interface {
 	Create(ctx context.Context, req *CreateUniversityRequest) (*CreateUniversityResponse, error)
+	Patch(ctx context.Context, id string, req *PatchUniversityRequest) (*CreateUniversityResponse, error)
 	Get(ctx context.Context, q pagination.Query, f Filters) ([]UniversityListItem, int64, error)
 	GetByID(ctx context.Context, id string) (*UniversityDetailResponse, error)
 	Search(ctx context.Context, q string) ([]UniversitySearchResult, error)
@@ -48,6 +49,19 @@ func (s *universityService) Create(ctx context.Context, req *CreateUniversityReq
 	})
 	if err != nil {
 		log.Default().Printf("failed to create university: %v", err)
+		return nil, err
+	}
+
+	return toCreateUniversityResponse(row), nil
+}
+
+func (s *universityService) Patch(ctx context.Context, id string, req *PatchUniversityRequest) (*CreateUniversityResponse, error) {
+	row, err := s.repo.Patch(ctx, id, req)
+	if err != nil {
+		if errors.Is(err, errs.ErrNotFound) {
+			return nil, errs.ErrNotFound
+		}
+		log.Default().Printf("failed to patch university %s: %v", id, err)
 		return nil, err
 	}
 

@@ -13,6 +13,7 @@ type UserService interface {
 	GetByID(ctx context.Context, id string) (*User, error)
 	GetByProvider(ctx context.Context, provider, providerID string) (*User, error)
 	CreateWithOAuth(ctx context.Context, fullName, email, provider, providerID, avatar string) (*User, error)
+	CreateRepresentative(ctx context.Context, fullName, email, password, universityID string) (*User, error)
 }
 
 type userService struct {
@@ -57,4 +58,20 @@ func (s *userService) GetByProvider(ctx context.Context, provider, providerID st
 
 func (s *userService) CreateWithOAuth(ctx context.Context, fullName, email, provider, providerID, avatar string) (*User, error) {
 	return s.userRepo.CreateWithOAuth(ctx, fullName, email, provider, providerID, avatar)
+}
+
+func (s *userService) CreateRepresentative(ctx context.Context, fullName, email, password, universityID string) (*User, error) {
+	existing, err := s.userRepo.GetByEmail(ctx, email)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return nil, errs.ErrUserAlreadyExists
+	}
+
+	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, err
+	}
+	return s.userRepo.CreateRepresentative(ctx, fullName, email, string(hashed), universityID)
 }

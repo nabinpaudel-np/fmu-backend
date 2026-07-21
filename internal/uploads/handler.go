@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"fmu-backend/internal/cloudinary"
 	"fmu-backend/internal/response"
+	"fmu-backend/internal/supabase"
 	"fmu-backend/internal/validator"
 )
 
@@ -17,6 +19,10 @@ var allowedImageMimes = map[string]struct{}{
 	"image/png":  {},
 	"image/webp": {},
 	"image/gif":  {},
+}
+
+var allowedDocumentMimes = map[string]struct{}{
+	"application/pdf": {},
 }
 
 const fileFieldName = "file"
@@ -56,7 +62,7 @@ func (h *UploadsHandler) Sign(w http.ResponseWriter, r *http.Request) {
 
 func (h *UploadsHandler) UploadImage(w http.ResponseWriter, r *http.Request) {
 	purpose := r.URL.Query().Get("purpose")
-	if _, ok := AllowedPurposes[purpose]; !ok {
+	if !isImagePurpose(purpose) {
 		response.Error(w, http.StatusBadRequest, "query parameter 'purpose' must be one of: logo, cover, gallery")
 		return
 	}
@@ -109,4 +115,72 @@ func (h *UploadsHandler) UploadImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response.Success(w, http.StatusCreated, out)
+}
+
+// UploadDocument handles POST /api/v1/uploads/document?purpose=document. Only
+// PDFs are accepted — these are the verification documents attached to a
+// university claim. Uploaded as a Cloudinary "raw" resource so it can be
+// downloaded without any image transformations.
+func (h *UploadsHandler) UploadDocument(w http.ResponseWriter, r *http.Request) {
+	purpose := r.URL.Query().Get("purpose")
+	if !strings.EqualFold(purpose, "document") {
+		response.Error(w, http.StatusBadRequest, "query parameter 'purpose' must be 'document'")
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, MaxDocumentBytes)
+
+	if err := r.ParseMultipartForm(MaxDocumentBytes); err != nil {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			response.Error(w, http.StatusRequestEntityTooLarge,
+				fmt.Sprintf("file exceeds %d bytes", MaxDocumentBytes))
+			return
+		}
+		response.Error(w, http.StatusBadRequest, "invalid multipart form")
+		return
+	}
+
+	file, header, err := r.FormFile(fileFieldName)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "file is required (multipart field 'file')")
+		return
+	}
+	defer file.Close()
+
+	if header.Size <= 0 {
+		response.Error(w, http.StatusBadRequest, "file is empty")
+		return
+	}
+
+	head := make([]byte, 512)
+	n, _ := io.ReadFull(file, head)
+	mime := http.DetectContentType(head[:n])
+	if _, ok := allowedDocumentMimes[mime]; !ok {
+		response.Error(w, http.StatusUnsupportedMediaType,
+			fmt.Sprintf("mime type %s is not allowed (only application/pdf)", mime))
+		return
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+
+	out, err := h.svc.UploadDocument(r.Context(), purpose, file, mime)
+	if err != nil {
+		if errors.Is(err, supabase.ErrUploadFailed) || errors.Is(err, supabase.ErrNotConfigured) {
+			response.Error(w, http.StatusBadGateway, "upload to storage failed")
+			return
+		}
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+	response.Success(w, http.StatusCreated, out)
+}
+
+func isImagePurpose(p string) bool {
+	switch p {
+	case "logo", "cover", "gallery":
+		return true
+	}
+	return false
 }

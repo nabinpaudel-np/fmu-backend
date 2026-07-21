@@ -15,6 +15,27 @@ type Athletic struct {
 	Name string
 }
 
+type College struct {
+	ID           string
+	Name         string
+	Slug         string
+	UniversityID string
+	Overview     string
+	Country      *string
+	State        *string
+	City         *string
+	FullLocation *string
+	Logo         *string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+type CollegeFavorite struct {
+	UserID    string
+	CollegeID string
+	CreatedAt time.Time
+}
+
 type DegreeLevel struct {
 	ID   string
 	Name string
@@ -102,9 +123,30 @@ type UniversityAthletic struct {
 	AthleticID   string
 }
 
+type UniversityClaim struct {
+	ID            string
+	UniversityID  string
+	FullName      string
+	WorkEmail     string
+	DocumentUrl   string
+	Status        string
+	ReviewerID    pgtype.UUID
+	ReviewedAt    pgtype.Timestamptz
+	ReviewNote    *string
+	CreatedUserID pgtype.UUID
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
 type UniversityDegreeLevel struct {
 	UniversityID  string
 	DegreeLevelID string
+}
+
+type UniversityFavorite struct {
+	UserID       string
+	UniversityID string
+	CreatedAt    time.Time
 }
 
 type UniversityMajor struct {
@@ -128,15 +170,16 @@ type UniversitySupportService struct {
 }
 
 type User struct {
-	ID            string
-	FullName      string
-	Avatar        *string
-	Email         string
-	Password      *string
-	Provider      *string
-	ProviderID    *string
-	EmailVerified bool
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	Role          string
+	ID                         string
+	FullName                   string
+	Avatar                     *string
+	Email                      string
+	Password                   *string
+	Provider                   *string
+	ProviderID                 *string
+	EmailVerified              bool
+	CreatedAt                  time.Time
+	UpdatedAt                  time.Time
+	Role                       string
+	RepresentativeUniversityID pgtype.UUID
 }

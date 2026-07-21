@@ -31,6 +31,8 @@ type (
 		FullName     string `json:"full_name" example:"Ada Lovelace"`
 		Email        string `json:"email" example:"ada@example.com"`
 		Avatar       string `json:"avatar,omitempty" example:"https://cdn.example.com/avatars/ada.png"`
+		Role         string `json:"role" example:"student"`
+		RepresentativeUniversityID string `json:"representative_university_id,omitempty" example:"d3b07384-d9a2-4e0a-b71e-1c9f3e3e0a1b"`
 	}
 )
 
@@ -44,15 +46,18 @@ type (
 		FullName     string `json:"full_name" example:"Ada Lovelace"`
 		Email        string `json:"email" example:"ada@example.com"`
 		Avatar       string `json:"avatar,omitempty" example:"https://cdn.example.com/avatars/ada.png"`
+		Role         string `json:"role" example:"student"`
+		RepresentativeUniversityID string `json:"representative_university_id,omitempty" example:"d3b07384-d9a2-4e0a-b71e-1c9f3e3e0a1b"`
 	}
 )
 
 type LogoutRequest struct{}
 
 type MeResponse struct {
-	UserID   string `json:"user_id" example:"d3b07384-d9a2-4e0a-b71e-1c9f3e3e0a1b"`
-	FullName string `json:"full_name" example:"Ada Lovelace"`
-	Email    string `json:"email" example:"ada@example.com"`
-	Avatar   string `json:"avatar,omitempty" example:"https://cdn.example.com/avatars/ada.png"`
-	Role     string `json:"role" example:"student"`
+	UserID       string `json:"user_id" example:"d3b07384-d9a2-4e0a-b71e-1c9f3e3e0a1b"`
+	FullName     string `json:"full_name" example:"Ada Lovelace"`
+	Email        string `json:"email" example:"ada@example.com"`
+	Avatar       string `json:"avatar,omitempty" example:"https://cdn.example.com/avatars/ada.png"`
+	Role         string `json:"role" example:"student"`
+	RepresentativeUniversityID string `json:"representative_university_id,omitempty" example:"d3b07384-d9a2-4e0a-b71e-1c9f3e3e0a1b"`
 }

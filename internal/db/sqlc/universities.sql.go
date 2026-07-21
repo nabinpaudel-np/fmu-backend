@@ -172,6 +172,60 @@ func (q *Queries) CreateUniversity(ctx context.Context, arg CreateUniversityPara
 	return i, err
 }
 
+const deleteUniversityAthletics = `-- name: DeleteUniversityAthletics :exec
+DELETE FROM university_athletics WHERE university_id = $1
+`
+
+func (q *Queries) DeleteUniversityAthletics(ctx context.Context, universityID string) error {
+	_, err := q.db.Exec(ctx, deleteUniversityAthletics, universityID)
+	return err
+}
+
+const deleteUniversityDegreeLevels = `-- name: DeleteUniversityDegreeLevels :exec
+DELETE FROM university_degree_levels WHERE university_id = $1
+`
+
+func (q *Queries) DeleteUniversityDegreeLevels(ctx context.Context, universityID string) error {
+	_, err := q.db.Exec(ctx, deleteUniversityDegreeLevels, universityID)
+	return err
+}
+
+const deleteUniversityMajors = `-- name: DeleteUniversityMajors :exec
+DELETE FROM university_majors WHERE university_id = $1
+`
+
+func (q *Queries) DeleteUniversityMajors(ctx context.Context, universityID string) error {
+	_, err := q.db.Exec(ctx, deleteUniversityMajors, universityID)
+	return err
+}
+
+const deleteUniversitySpecialAffiliations = `-- name: DeleteUniversitySpecialAffiliations :exec
+DELETE FROM university_special_affiliations WHERE university_id = $1
+`
+
+func (q *Queries) DeleteUniversitySpecialAffiliations(ctx context.Context, universityID string) error {
+	_, err := q.db.Exec(ctx, deleteUniversitySpecialAffiliations, universityID)
+	return err
+}
+
+const deleteUniversityStudyFormats = `-- name: DeleteUniversityStudyFormats :exec
+DELETE FROM university_study_formats WHERE university_id = $1
+`
+
+func (q *Queries) DeleteUniversityStudyFormats(ctx context.Context, universityID string) error {
+	_, err := q.db.Exec(ctx, deleteUniversityStudyFormats, universityID)
+	return err
+}
+
+const deleteUniversitySupportServices = `-- name: DeleteUniversitySupportServices :exec
+DELETE FROM university_support_services WHERE university_id = $1
+`
+
+func (q *Queries) DeleteUniversitySupportServices(ctx context.Context, universityID string) error {
+	_, err := q.db.Exec(ctx, deleteUniversitySupportServices, universityID)
+	return err
+}
+
 const getAthletics = `-- name: GetAthletics :many
 SELECT id, name FROM athletics ORDER BY name
 `
