@@ -81,8 +81,15 @@ func main() {
 	favoritesSvc := favorites.NewService(favoritesRepo, universitySvc, collegeSvc)
 	favoritesHandler := favorites.NewHandler(favoritesSvc)
 
-	claimRepo := claim.NewClaimRepository(queries)
-	claimSvc := claim.NewClaimService(claimRepo, claim.NewUniversityExisterAdapter(universitySvc), userSvc)
+	uniClaimRepo := claim.NewUniversityClaimRepository(queries)
+	colClaimRepo := claim.NewCollegeClaimRepository(queries)
+	claimSvc := claim.NewClaimService(
+		uniClaimRepo,
+		colClaimRepo,
+		claim.NewUniversityExisterAdapter(universitySvc),
+		claim.NewCollegeExisterAdapter(collegeSvc),
+		userSvc,
+	)
 	claimHandler := claim.NewClaimHandler(claimSvc)
 
 	cld, err := cloudinary.New(cloudinary.Config{

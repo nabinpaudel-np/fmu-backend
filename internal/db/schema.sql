@@ -255,7 +255,8 @@ CREATE TABLE public.users (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     role character varying(20) DEFAULT 'student'::character varying NOT NULL,
-    representative_university_id uuid
+    representative_university_id uuid,
+    representative_college_id uuid
 );
 
 
@@ -647,7 +648,8 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260706000001'),
     ('20260719000001'),
     ('20260720000001'),
-    ('20260720000002');
+    ('20260720000002'),
+    ('20260723000001');
 
 --
 -- Name: colleges; Type: TABLE; Schema: public; Owner: -
@@ -879,3 +881,93 @@ CREATE INDEX idx_university_claims_university_id ON public.university_claims USI
 --
 
 CREATE INDEX idx_university_claims_status ON public.university_claims USING btree (status, created_at DESC);
+
+
+--
+-- Name: college_claims; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.college_claims (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    college_id uuid NOT NULL,
+    full_name character varying(255) NOT NULL,
+    work_email character varying(255) NOT NULL,
+    document_url character varying(500) NOT NULL,
+    status character varying(20) DEFAULT 'pending'::character varying NOT NULL,
+    reviewer_id uuid,
+    reviewed_at timestamp with time zone,
+    review_note text,
+    created_user_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT college_claims_status_check CHECK (status::text = ANY (ARRAY['pending'::character varying, 'approved'::character varying, 'rejected'::character varying]::text[]))
+);
+
+
+--
+-- Name: college_claims college_claims_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.college_claims
+    ADD CONSTRAINT college_claims_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: college_claims college_claims_college_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.college_claims
+    ADD CONSTRAINT college_claims_college_id_fkey FOREIGN KEY (college_id) REFERENCES public.colleges(id) ON DELETE CASCADE;
+
+
+--
+-- Name: college_claims college_claims_reviewer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.college_claims
+    ADD CONSTRAINT college_claims_reviewer_id_fkey FOREIGN KEY (reviewer_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: college_claims college_claims_created_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.college_claims
+    ADD CONSTRAINT college_claims_created_user_id_fkey FOREIGN KEY (created_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: idx_college_claims_college_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_college_claims_college_id ON public.college_claims USING btree (college_id);
+
+
+--
+-- Name: idx_college_claims_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_college_claims_status ON public.college_claims USING btree (status, created_at DESC);
+
+
+--
+-- Name: users users_representative_college_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_representative_college_id_key UNIQUE (representative_college_id);
+
+
+--
+-- Name: users users_representative_college_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_representative_college_id_fkey FOREIGN KEY (representative_college_id) REFERENCES public.colleges(id) ON DELETE SET NULL;
+
+
+--
+-- Name: idx_users_representative_college_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_users_representative_college_id ON public.users USING btree (representative_college_id) WHERE representative_college_id IS NOT NULL;

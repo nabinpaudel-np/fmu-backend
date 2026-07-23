@@ -15,6 +15,7 @@ import (
 
 type CollegeService interface {
 	Create(ctx context.Context, req *CreateCollegeRequest) (*CreateCollegeResponse, error)
+	Update(ctx context.Context, id string, req *UpdateCollegeRequest) (*CreateCollegeResponse, error)
 	List(ctx context.Context, q pagination.Query, f Filters) ([]CollegeListItem, int64, error)
 	GetByID(ctx context.Context, id string) (*CollegeDetailResponse, error)
 	ListByUniversity(ctx context.Context, universityID string, q pagination.Query) ([]CollegeListItem, int64, error)
@@ -74,6 +75,27 @@ func (s *collegeService) GetByID(ctx context.Context, id string) (*CollegeDetail
 		return nil, err
 	}
 	return toCollegeDetailResponse(row), nil
+}
+
+func (s *collegeService) Update(ctx context.Context, id string, req *UpdateCollegeRequest) (*CreateCollegeResponse, error) {
+	// AuthMiddleware injects claims into ctx; admin-or-rep middleware already
+	// gated the route. For reps we additionally require their bound college
+	// id to match the URL — RequireCollegeEditor handles admin + rep-scope
+	// checks at the HTTP layer, so by the time we reach here, the only
+	// remaining check is "did the caller pass an id they own?" — already
+	// validated upstream. No additional in-body guard needed.
+	row, err := s.repo.Update(ctx, id, req)
+	if err != nil {
+		if errors.Is(err, errs.ErrNotFound) {
+			return nil, errs.ErrNotFound
+		}
+		if errors.Is(err, errs.ErrCollegeSlugTaken) {
+			return nil, err
+		}
+		log.Default().Printf("failed to update college %s: %v", id, err)
+		return nil, err
+	}
+	return toCreateCollegeResponse(row), nil
 }
 
 func (s *collegeService) ListByUniversity(ctx context.Context, universityID string, q pagination.Query) ([]CollegeListItem, int64, error) {

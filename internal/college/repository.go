@@ -17,6 +17,7 @@ import (
 
 type CollegeRepository interface {
 	Create(ctx context.Context, params sqlc.CreateCollegeParams) (sqlc.College, error)
+	Update(ctx context.Context, id string, req *UpdateCollegeRequest) (sqlc.College, error)
 	List(ctx context.Context, q pagination.Query, f Filters) ([]sqlc.College, int64, error)
 	GetByID(ctx context.Context, id string) (sqlc.College, error)
 	ListByUniversity(ctx context.Context, universityID string, q pagination.Query) ([]sqlc.College, int64, error)
@@ -129,6 +130,82 @@ func buildCollegesWhere(f Filters) (string, []any) {
 
 func (r *collegeRepository) GetByID(ctx context.Context, id string) (sqlc.College, error) {
 	return r.queries.GetCollegeByID(ctx, id)
+}
+
+// Update is a partial update: only fields the request supplies are written.
+// We build the SET clause in Go (like universities' Patch) because the
+// column set is too dynamic for a single sqlc query. Returns ErrNotFound
+// when the id doesn't match any row.
+func (r *collegeRepository) Update(ctx context.Context, id string, req *UpdateCollegeRequest) (sqlc.College, error) {
+	sets := []string{}
+	args := []any{}
+
+	addSet := func(col string, val any) {
+		args = append(args, val)
+		sets = append(sets, fmt.Sprintf("%s = $%d", col, len(args)))
+	}
+
+	if req.Name != nil {
+		addSet("name", *req.Name)
+	}
+	if req.Slug != nil {
+		addSet("slug", *req.Slug)
+	}
+	if req.Overview != nil {
+		addSet("overview", *req.Overview)
+	}
+	if req.Country != nil {
+		addSet("country", *req.Country)
+	}
+	if req.State != nil {
+		addSet("state", *req.State)
+	}
+	if req.City != nil {
+		addSet("city", *req.City)
+	}
+	if req.FullLocation != nil {
+		addSet("full_location", *req.FullLocation)
+	}
+	if req.Logo != nil {
+		addSet("logo", *req.Logo)
+	}
+
+	if len(sets) == 0 {
+		// Nothing to update — just return the current row.
+		return r.queries.GetCollegeByID(ctx, id)
+	}
+
+	sets = append(sets, "updated_at = now()")
+	args = append(args, id)
+	// Columns spelled out for the same reason as List: ALTER TABLE ADD COLUMN
+	// has reordered the runtime columns from schema.sql's declaration order,
+	// so SELECT * doesn't match sqlc.College's scan order.
+	sql := fmt.Sprintf(
+		`UPDATE colleges SET %s WHERE id = $%d
+		 RETURNING id, name, slug, university_id, overview, country, state, city, full_location, logo, created_at, updated_at`,
+		strings.Join(sets, ", "), len(args),
+	)
+
+	var row sqlc.College
+	err := r.pool.QueryRow(ctx, sql, args...).Scan(
+		&row.ID, &row.Name, &row.Slug, &row.UniversityID, &row.Overview,
+		&row.Country, &row.State, &row.City, &row.FullLocation, &row.Logo,
+		&row.CreatedAt, &row.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return sqlc.College{}, errs.ErrNotFound
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return sqlc.College{}, fmt.Errorf("%w (slug=%v)", errs.ErrCollegeSlugTaken, deref(req.Slug))
+		}
+		if errors.As(err, &pgErr) && pgErr.Code == "22P02" {
+			return sqlc.College{}, errs.ErrNotFound
+		}
+		return sqlc.College{}, err
+	}
+	return row, nil
 }
 
 func (r *collegeRepository) ListByUniversity(ctx context.Context, universityID string, q pagination.Query) ([]sqlc.College, int64, error) {

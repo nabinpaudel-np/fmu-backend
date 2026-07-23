@@ -8,7 +8,7 @@ import (
 )
 
 type TokenService interface {
-	CreateAccessToken(userID, email, role, repUniversityID string) (string, error)
+	CreateAccessToken(userID, email, role, repUniversityID, repCollegeID string) (string, error)
 	CreateRefreshToken(ctx context.Context, userID string, userAgent string) (string, error)
 	ValidateRefreshToken(ctx context.Context, token string) (string, error)
 	DeleteByTokenHash(ctx context.Context, tokenHash string) error
@@ -26,8 +26,8 @@ func NewTokenService(tokenRepo TokenRepository, cfg *config.Config) TokenService
 	}
 }
 
-func (s *tokenService) CreateAccessToken(userID, email, role, repUniversityID string) (string, error) {
-	return GenerateAccessToken(userID, email, role, repUniversityID, s.cfg.AccessTokenSecret, s.cfg.AccessTokenExpiry)
+func (s *tokenService) CreateAccessToken(userID, email, role, repUniversityID, repCollegeID string) (string, error) {
+	return GenerateAccessToken(userID, email, role, repUniversityID, repCollegeID, s.cfg.AccessTokenSecret, s.cfg.AccessTokenExpiry)
 }
 
 func (s *tokenService) CreateRefreshToken(ctx context.Context, userID string, userAgent string) (string, error) {

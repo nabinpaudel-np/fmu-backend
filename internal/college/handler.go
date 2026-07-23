@@ -121,6 +121,35 @@ func (h *CollegeHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	response.Success(w, http.StatusOK, detail)
 }
 
+func (h *CollegeHandler) Update(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	var req UpdateCollegeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := validator.Validate.Struct(&req); err != nil {
+		fields := validator.GetValidationErrors(err)
+		response.ValidationError(w, http.StatusBadRequest, fields)
+		return
+	}
+
+	res, err := h.collegeService.Update(r.Context(), id, &req)
+	if err != nil {
+		switch {
+		case errors.Is(err, errs.ErrNotFound):
+			response.Error(w, http.StatusNotFound, "college not found")
+		case errors.Is(err, errs.ErrCollegeSlugTaken):
+			response.Error(w, http.StatusConflict, err.Error())
+		default:
+			response.Error(w, http.StatusInternalServerError, "something went wrong")
+		}
+		return
+	}
+	response.Success(w, http.StatusOK, res)
+}
+
 func (h *CollegeHandler) ListByUniversity(w http.ResponseWriter, r *http.Request) {
 	universityID := chi.URLParam(r, "universityID")
 	q := pagination.Parse(r)

@@ -72,7 +72,7 @@ func (s *authService) Login(ctx context.Context, req *LoginRequest, userAgent st
 		return nil, errs.ErrInvalidCredentials
 	}
 
-	res, err := s.buildLoginResponse(ctx, existing.ID, existing.Email, existing.Role, existing.RepresentativeUniversityID, existing.Avatar, existing.FullName, userAgent)
+	res, err := s.buildLoginResponse(ctx, existing.ID, existing.Email, existing.Role, existing.RepresentativeUniversityID, existing.RepresentativeCollegeID, existing.Avatar, existing.FullName, userAgent)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +103,11 @@ func (s *authService) Refresh(ctx context.Context, refreshToken string, userAgen
 	if u.RepresentativeUniversityID != nil {
 		repUniID = *u.RepresentativeUniversityID
 	}
-	accessToken, err := s.tokenService.CreateAccessToken(u.ID, u.Email, u.Role, repUniID)
+	repCollegeID := ""
+	if u.RepresentativeCollegeID != nil {
+		repCollegeID = *u.RepresentativeCollegeID
+	}
+	accessToken, err := s.tokenService.CreateAccessToken(u.ID, u.Email, u.Role, repUniID, repCollegeID)
 	if err != nil {
 		return nil, errs.ErrInternalServer
 	}
@@ -119,14 +123,15 @@ func (s *authService) Refresh(ctx context.Context, refreshToken string, userAgen
 	}
 
 	return &RefreshResponse{
-		AccessToken:                 accessToken,
-		RefreshToken:                newRefreshToken,
-		UserID:                      u.ID,
-		FullName:                    u.FullName,
-		Email:                       u.Email,
-		Avatar:                      avatar,
-		Role:                        u.Role,
-		RepresentativeUniversityID:  repUniID,
+		AccessToken:                accessToken,
+		RefreshToken:               newRefreshToken,
+		UserID:                     u.ID,
+		FullName:                   u.FullName,
+		Email:                      u.Email,
+		Avatar:                     avatar,
+		Role:                       u.Role,
+		RepresentativeUniversityID: repUniID,
+		RepresentativeCollegeID:    repCollegeID,
 	}, nil
 }
 
@@ -149,6 +154,10 @@ func (s *authService) Me(ctx context.Context, userID string) (*MeResponse, error
 	if u.RepresentativeUniversityID != nil {
 		repUniID = *u.RepresentativeUniversityID
 	}
+	repCollegeID := ""
+	if u.RepresentativeCollegeID != nil {
+		repCollegeID = *u.RepresentativeCollegeID
+	}
 
 	return &MeResponse{
 		UserID:                     u.ID,
@@ -157,6 +166,7 @@ func (s *authService) Me(ctx context.Context, userID string) (*MeResponse, error
 		Avatar:                     avatar,
 		Role:                       u.Role,
 		RepresentativeUniversityID: repUniID,
+		RepresentativeCollegeID:    repCollegeID,
 	}, nil
 }
 
@@ -194,19 +204,23 @@ func (s *authService) GoogleLogin(ctx context.Context, code, codeVerifier string
 		}
 	}
 
-	res, err := s.buildLoginResponse(ctx, user.ID, user.Email, user.Role, user.RepresentativeUniversityID, user.Avatar, user.FullName, userAgent)
+	res, err := s.buildLoginResponse(ctx, user.ID, user.Email, user.Role, user.RepresentativeUniversityID, user.RepresentativeCollegeID, user.Avatar, user.FullName, userAgent)
 	if err != nil {
 		return nil, err
 	}
 	return res, nil
 }
 
-func (s *authService) buildLoginResponse(ctx context.Context, userID, email, role string, repUniversityID *string, avatar *string, fullName, userAgent string) (*LoginResponse, error) {
-	repID := ""
+func (s *authService) buildLoginResponse(ctx context.Context, userID, email, role string, repUniversityID, repCollegeID *string, avatar *string, fullName, userAgent string) (*LoginResponse, error) {
+	repUniID := ""
 	if repUniversityID != nil {
-		repID = *repUniversityID
+		repUniID = *repUniversityID
 	}
-	accessToken, err := s.tokenService.CreateAccessToken(userID, email, role, repID)
+	repColID := ""
+	if repCollegeID != nil {
+		repColID = *repCollegeID
+	}
+	accessToken, err := s.tokenService.CreateAccessToken(userID, email, role, repUniID, repColID)
 	if err != nil {
 		return nil, errs.ErrInternalServer
 	}
@@ -229,7 +243,8 @@ func (s *authService) buildLoginResponse(ctx context.Context, userID, email, rol
 		Email:                      email,
 		Avatar:                     avatarStr,
 		Role:                       role,
-		RepresentativeUniversityID: repID,
+		RepresentativeUniversityID: repUniID,
+		RepresentativeCollegeID:    repColID,
 	}, nil
 }
 

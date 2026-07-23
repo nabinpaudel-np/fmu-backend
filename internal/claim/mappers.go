@@ -9,76 +9,118 @@ import (
 )
 
 // claimJoinRow is the shared mapping shape used by all claim list/detail
-// mappers. Both sqlc.GetUniversityClaimByIDRow and sqlc.ListUniversityClaimsRow
-// have identical field sets (they came from the same JOIN shape) so we
+// mappers. Both university and college rows share the same field set (they
+// came from the same JOIN shape — just a different target table) so we
 // funnel them through one mapper via these adapters.
 type claimJoinRow struct {
-	ID             string
-	UniversityID   string
-	UniversityName string
-	FullName       string
-	WorkEmail      string
-	DocumentURL    string
-	Status         string
-	ReviewerID     pgtype.UUID
-	ReviewedAt     pgtype.Timestamptz
-	ReviewNote     *string
-	CreatedUserID  pgtype.UUID
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	Type          ClaimTarget
+	ID            string
+	TargetID      string
+	TargetName    string
+	FullName      string
+	WorkEmail     string
+	DocumentURL   string
+	Status        string
+	ReviewerID    pgtype.UUID
+	ReviewedAt    pgtype.Timestamptz
+	ReviewNote    *string
+	CreatedUserID pgtype.UUID
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
-func fromGetRow(r sqlc.GetUniversityClaimByIDRow) claimJoinRow {
+func fromUniGetRow(r sqlc.GetUniversityClaimByIDRow) claimJoinRow {
 	return claimJoinRow{
-		ID:             r.ID,
-		UniversityID:   r.UniversityID,
-		UniversityName: r.UniversityName,
-		FullName:       r.FullName,
-		WorkEmail:      r.WorkEmail,
-		DocumentURL:    r.DocumentUrl,
-		Status:         r.Status,
-		ReviewerID:     r.ReviewerID,
-		ReviewedAt:     r.ReviewedAt,
-		ReviewNote:     r.ReviewNote,
-		CreatedUserID:  r.CreatedUserID,
-		CreatedAt:      r.CreatedAt,
-		UpdatedAt:      r.UpdatedAt,
+		Type:          TargetUniversity,
+		ID:            r.ID,
+		TargetID:      r.UniversityID,
+		TargetName:    r.UniversityName,
+		FullName:      r.FullName,
+		WorkEmail:     r.WorkEmail,
+		DocumentURL:   r.DocumentUrl,
+		Status:        r.Status,
+		ReviewerID:    r.ReviewerID,
+		ReviewedAt:    r.ReviewedAt,
+		ReviewNote:    r.ReviewNote,
+		CreatedUserID: r.CreatedUserID,
+		CreatedAt:     r.CreatedAt,
+		UpdatedAt:     r.UpdatedAt,
 	}
 }
 
-func fromListRow(r sqlc.ListUniversityClaimsRow) claimJoinRow {
+func fromUniListRow(r sqlc.ListUniversityClaimsRow) claimJoinRow {
 	return claimJoinRow{
-		ID:             r.ID,
-		UniversityID:   r.UniversityID,
-		UniversityName: r.UniversityName,
-		FullName:       r.FullName,
-		WorkEmail:      r.WorkEmail,
-		DocumentURL:    r.DocumentUrl,
-		Status:         r.Status,
-		ReviewerID:     r.ReviewerID,
-		ReviewedAt:     r.ReviewedAt,
-		ReviewNote:     r.ReviewNote,
-		CreatedUserID:  r.CreatedUserID,
-		CreatedAt:      r.CreatedAt,
-		UpdatedAt:      r.UpdatedAt,
+		Type:          TargetUniversity,
+		ID:            r.ID,
+		TargetID:      r.UniversityID,
+		TargetName:    r.UniversityName,
+		FullName:      r.FullName,
+		WorkEmail:     r.WorkEmail,
+		DocumentURL:   r.DocumentUrl,
+		Status:        r.Status,
+		ReviewerID:    r.ReviewerID,
+		ReviewedAt:    r.ReviewedAt,
+		ReviewNote:    r.ReviewNote,
+		CreatedUserID: r.CreatedUserID,
+		CreatedAt:     r.CreatedAt,
+		UpdatedAt:     r.UpdatedAt,
+	}
+}
+
+func fromColGetRow(r sqlc.GetCollegeClaimByIDRow) claimJoinRow {
+	return claimJoinRow{
+		Type:          TargetCollege,
+		ID:            r.ID,
+		TargetID:      r.CollegeID,
+		TargetName:    r.CollegeName,
+		FullName:      r.FullName,
+		WorkEmail:     r.WorkEmail,
+		DocumentURL:   r.DocumentUrl,
+		Status:        r.Status,
+		ReviewerID:    r.ReviewerID,
+		ReviewedAt:    r.ReviewedAt,
+		ReviewNote:    r.ReviewNote,
+		CreatedUserID: r.CreatedUserID,
+		CreatedAt:     r.CreatedAt,
+		UpdatedAt:     r.UpdatedAt,
+	}
+}
+
+func fromColListRow(r sqlc.ListCollegeClaimsRow) claimJoinRow {
+	return claimJoinRow{
+		Type:          TargetCollege,
+		ID:            r.ID,
+		TargetID:      r.CollegeID,
+		TargetName:    r.CollegeName,
+		FullName:      r.FullName,
+		WorkEmail:     r.WorkEmail,
+		DocumentURL:   r.DocumentUrl,
+		Status:        r.Status,
+		ReviewerID:    r.ReviewerID,
+		ReviewedAt:    r.ReviewedAt,
+		ReviewNote:    r.ReviewNote,
+		CreatedUserID: r.CreatedUserID,
+		CreatedAt:     r.CreatedAt,
+		UpdatedAt:     r.UpdatedAt,
 	}
 }
 
 func toClaimListItem(c claimJoinRow) ClaimListItem {
 	return ClaimListItem{
-		ID:             c.ID,
-		UniversityID:   c.UniversityID,
-		UniversityName: c.UniversityName,
-		FullName:       c.FullName,
-		WorkEmail:      c.WorkEmail,
-		DocumentURL:    c.DocumentURL,
-		Status:         c.Status,
-		ReviewerID:     uuidStringPtr(c.ReviewerID),
-		ReviewedAt:     timePtr(c.ReviewedAt),
-		ReviewNote:     c.ReviewNote,
-		CreatedUserID:  uuidStringPtr(c.CreatedUserID),
-		CreatedAt:      c.CreatedAt,
-		UpdatedAt:      c.UpdatedAt,
+		ID:            c.ID,
+		Type:          c.Type,
+		TargetID:      c.TargetID,
+		TargetName:    c.TargetName,
+		FullName:      c.FullName,
+		WorkEmail:     c.WorkEmail,
+		DocumentURL:   c.DocumentURL,
+		Status:        c.Status,
+		ReviewerID:    uuidStringPtr(c.ReviewerID),
+		ReviewedAt:    timePtr(c.ReviewedAt),
+		ReviewNote:    c.ReviewNote,
+		CreatedUserID: uuidStringPtr(c.CreatedUserID),
+		CreatedAt:     c.CreatedAt,
+		UpdatedAt:     c.UpdatedAt,
 	}
 }
 

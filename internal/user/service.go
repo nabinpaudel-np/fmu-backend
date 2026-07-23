@@ -2,8 +2,10 @@ package user
 
 import (
 	"context"
+	"errors"
 	"fmu-backend/internal/errs"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -14,6 +16,7 @@ type UserService interface {
 	GetByProvider(ctx context.Context, provider, providerID string) (*User, error)
 	CreateWithOAuth(ctx context.Context, fullName, email, provider, providerID, avatar string) (*User, error)
 	CreateRepresentative(ctx context.Context, fullName, email, password, universityID string) (*User, error)
+	CreateCollegeRepresentative(ctx context.Context, fullName, email, password, collegeID string) (*User, error)
 }
 
 type userService struct {
@@ -74,4 +77,30 @@ func (s *userService) CreateRepresentative(ctx context.Context, fullName, email,
 		return nil, err
 	}
 	return s.userRepo.CreateRepresentative(ctx, fullName, email, string(hashed), universityID)
+}
+
+func (s *userService) CreateCollegeRepresentative(ctx context.Context, fullName, email, password, collegeID string) (*User, error) {
+	existing, err := s.userRepo.GetByEmail(ctx, email)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return nil, errs.ErrUserAlreadyExists
+	}
+
+	hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, err
+	}
+	user, err := s.userRepo.CreateCollegeRepresentative(ctx, fullName, email, string(hashed), collegeID)
+	if err != nil {
+		// The UNIQUE constraint on representative_college_id surfaces as 23505;
+		// map it to a clear error the caller can surface to admins.
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return nil, errs.ErrCollegeAlreadyHasRepresentative
+		}
+		return nil, err
+	}
+	return user, nil
 }

@@ -17,6 +17,7 @@ type UserRepository interface {
 	GetByProvider(ctx context.Context, provider, providerID string) (*User, error)
 	CreateWithOAuth(ctx context.Context, fullName, email, provider, providerID, avatar string) (*User, error)
 	CreateRepresentative(ctx context.Context, fullName, email, passwordHash, universityID string) (*User, error)
+	CreateCollegeRepresentative(ctx context.Context, fullName, email, passwordHash, collegeID string) (*User, error)
 }
 
 type userRepository struct {
@@ -94,10 +95,23 @@ func (r *userRepository) CreateWithOAuth(ctx context.Context, fullName, email, p
 
 func (r *userRepository) CreateRepresentative(ctx context.Context, fullName, email, passwordHash, universityID string) (*User, error) {
 	row, err := r.queries.CreateRepresentativeUser(ctx, sqlc.CreateRepresentativeUserParams{
-		FullName: fullName,
-		Email:    email,
-		Password: &passwordHash,
+		FullName:                   fullName,
+		Email:                      email,
+		Password:                   &passwordHash,
 		RepresentativeUniversityID: uuidFromString(universityID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return toDomainUser(row), nil
+}
+
+func (r *userRepository) CreateCollegeRepresentative(ctx context.Context, fullName, email, passwordHash, collegeID string) (*User, error) {
+	row, err := r.queries.CreateCollegeRepresentativeUser(ctx, sqlc.CreateCollegeRepresentativeUserParams{
+		FullName:                fullName,
+		Email:                   email,
+		Password:                &passwordHash,
+		RepresentativeCollegeID: uuidFromString(collegeID),
 	})
 	if err != nil {
 		return nil, err
@@ -107,18 +121,19 @@ func (r *userRepository) CreateRepresentative(ctx context.Context, fullName, ema
 
 func toDomainUser(u sqlc.User) *User {
 	return &User{
-		ID:                       u.ID,
-		FullName:                 u.FullName,
-		Email:                    u.Email,
-		Password:                 u.Password,
-		Provider:                 u.Provider,
-		ProviderID:               u.ProviderID,
-		Avatar:                   u.Avatar,
-		EmailVerified:            u.EmailVerified,
-		Role:                     u.Role,
+		ID:                         u.ID,
+		FullName:                   u.FullName,
+		Email:                      u.Email,
+		Password:                   u.Password,
+		Provider:                   u.Provider,
+		ProviderID:                 u.ProviderID,
+		Avatar:                     u.Avatar,
+		EmailVerified:              u.EmailVerified,
+		Role:                       u.Role,
 		RepresentativeUniversityID: uuidToStringPtr(u.RepresentativeUniversityID),
-		CreatedAt:                u.CreatedAt,
-		UpdatedAt:                u.UpdatedAt,
+		RepresentativeCollegeID:    uuidToStringPtr(u.RepresentativeCollegeID),
+		CreatedAt:                  u.CreatedAt,
+		UpdatedAt:                  u.UpdatedAt,
 	}
 }
 

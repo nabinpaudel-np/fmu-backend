@@ -30,6 +30,21 @@ type College struct {
 	UpdatedAt    time.Time
 }
 
+type CollegeClaim struct {
+	ID            string
+	CollegeID     string
+	FullName      string
+	WorkEmail     string
+	DocumentUrl   string
+	Status        string
+	ReviewerID    pgtype.UUID
+	ReviewedAt    pgtype.Timestamptz
+	ReviewNote    *string
+	CreatedUserID pgtype.UUID
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
 type CollegeFavorite struct {
 	UserID    string
 	CollegeID string
@@ -182,4 +197,5 @@ type User struct {
 	UpdatedAt                  time.Time
 	Role                       string
 	RepresentativeUniversityID pgtype.UUID
+	RepresentativeCollegeID    pgtype.UUID
 }

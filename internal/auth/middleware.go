@@ -124,3 +124,37 @@ func RequireUniversityEditor(idParam string) func(http.Handler) http.Handler {
 		})
 	}
 }
+
+// RequireCollegeEditor gates a route so that only users who may edit a
+// specific college can pass. The URL parameter `id` (or any name passed to
+// idParam) is read as the target college's UUID.
+//
+// Admins are always allowed. Representatives are allowed only when their
+// JWT-bound RepresentativeCollegeID matches the URL id. Anyone else gets 403.
+// A university-level representative whose id is NOT bound to a college is
+// rejected — college editing requires the college-scoped representative role.
+func RequireCollegeEditor(idParam string) func(http.Handler) http.Handler {
+	if idParam == "" {
+		idParam = "id"
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims, err := ClaimsFromContext(r.Context())
+			if err != nil {
+				response.Error(w, http.StatusUnauthorized, errs.ErrUnauthorized.Error())
+				return
+			}
+
+			target := chi.URLParam(r, idParam)
+			if claims.Role == RoleAdmin {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if claims.Role == RoleRepresentative && claims.RepresentativeCollegeID != "" && claims.RepresentativeCollegeID == target {
+				next.ServeHTTP(w, r)
+				return
+			}
+			response.Error(w, http.StatusForbidden, errs.ErrForbidden.Error())
+		})
+	}
+}
