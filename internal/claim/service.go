@@ -13,6 +13,7 @@ import (
 
 	"fmu-backend/internal/auth"
 	"fmu-backend/internal/errs"
+	"fmu-backend/internal/mail"
 	"fmu-backend/internal/pagination"
 	"fmu-backend/internal/user"
 )
@@ -62,18 +63,29 @@ type claimService struct {
 	university UniversityExister
 	college    CollegeExister
 	users      UserCreator
+	mailer     *mail.Client // nil = approval emails disabled (SMTP not configured)
+	loginURL   string
 }
 
 // NewClaimService wires the claim service against two repositories (one
 // per target type) and two existers (for the existence pre-check on submit).
 // Callers with concrete service handles should use
 // NewUniversityExisterAdapter / NewCollegeExisterAdapter to bridge them.
+//
+// mailer is the SMTP client used to send the credentials email on
+// approval. Pass nil when SMTP is not configured — approval still
+// succeeds and returns the plaintext password to the admin, who can
+// forward it manually. loginURL is the absolute URL of the frontend
+// login page (e.g. "https://app.example.com/login") embedded in the
+// approval email.
 func NewClaimService(
 	uniRepo UniversityClaimRepository,
 	colRepo CollegeClaimRepository,
 	university UniversityExister,
 	college CollegeExister,
 	users UserCreator,
+	mailer *mail.Client,
+	loginURL string,
 ) ClaimService {
 	return &claimService{
 		uniRepo:    uniRepo,
@@ -81,6 +93,8 @@ func NewClaimService(
 		university: university,
 		college:    college,
 		users:      users,
+		mailer:     mailer,
+		loginURL:   loginURL,
 	}
 }
 
@@ -339,6 +353,27 @@ func (s *claimService) Approve(ctx context.Context, claimID, reviewerID string, 
 	if err != nil {
 		log.Default().Printf("refetch approved claim %s: %v", claimID, err)
 		return nil, err
+	}
+
+	// Email the new representative with their credentials. Best-effort:
+	// when SMTP is unreachable the admin already received the plaintext
+	// password in this response and can forward it manually, so we log
+	// and continue rather than failing the approval.
+	if s.mailer != nil {
+		institutionType := "university"
+		if target == TargetCollege {
+			institutionType = "college"
+		}
+		if err := s.mailer.SendClaimApproved(ctx, mail.ClaimApprovedData{
+			Email:           newUser.Email,
+			Password:        password,
+			FullName:        row.FullName,
+			InstitutionType: institutionType,
+			InstitutionName: updated.TargetName,
+			LoginURL:        s.loginURL,
+		}); err != nil {
+			log.Default().Printf("claim approval: send credentials email: %v", err)
+		}
 	}
 
 	return &ApproveClaimResponse{

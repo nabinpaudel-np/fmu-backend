@@ -132,12 +132,12 @@ type PatchUniversityRequest struct {
 	ContactPhone *string `json:"contact_phone,omitempty" validate:"omitempty,max=50"`
 	Website      *string `json:"website,omitempty"       validate:"omitempty,url,max=500"`
 
-	AvgHighSchoolGpa *float64   `json:"avg_high_school_gpa,omitempty" validate:"omitempty,gte=0,lte=5"`
-	FoundedYear      *int32     `json:"founded_year,omitempty"        validate:"omitempty,gte=1000,lte=2100"`
-	CampusSize       *string    `json:"campus_size,omitempty"         validate:"omitempty,max=100"`
-	GalleryImages    *[]string  `json:"gallery_images,omitempty"      validate:"omitempty,dive,url"`
-	IsPopular        *bool      `json:"is_popular,omitempty"`
-	IsFeatured       *bool      `json:"is_featured,omitempty"`
+	AvgHighSchoolGpa *float64  `json:"avg_high_school_gpa,omitempty" validate:"omitempty,gte=0,lte=5"`
+	FoundedYear      *int32    `json:"founded_year,omitempty"        validate:"omitempty,gte=1000,lte=2100"`
+	CampusSize       *string   `json:"campus_size,omitempty"         validate:"omitempty,max=100"`
+	GalleryImages    *[]string `json:"gallery_images,omitempty"      validate:"omitempty,dive,url"`
+	IsPopular        *bool     `json:"is_popular,omitempty"`
+	IsFeatured       *bool     `json:"is_featured,omitempty"`
 
 	// nil = leave existing associations untouched; non-nil (including [])
 	// = replace the entire association list.
@@ -159,22 +159,23 @@ type AllLookupsResponse struct {
 }
 
 type UniversityListItem struct {
-	ID              string  `json:"id"`
-	Name            string  `json:"name"`
-	Slug            string  `json:"slug"`
-	Country         string  `json:"country"`
-	State           string  `json:"state"`
-	City            string  `json:"city"`
-	Logo            string  `json:"logo"`
-	CoverImage      string  `json:"cover_image"`
-	InstitutionType string  `json:"institution_type"`
-	CampusSetting   string  `json:"campus_setting"`
-	TuitionMin      int32   `json:"tuition_min"`
-	TuitionMax      int32   `json:"tuition_max"`
-	AcceptanceRate  float64 `json:"acceptance_rate"`
-	IsPopular       bool    `json:"is_popular"`
-	IsFeatured      bool    `json:"is_featured"`
-	IsFavorited     bool    `json:"is_favorited"`
+	ID                string  `json:"id"`
+	Name              string  `json:"name"`
+	Slug              string  `json:"slug"`
+	Country           string  `json:"country"`
+	State             string  `json:"state"`
+	City              string  `json:"city"`
+	Logo              string  `json:"logo"`
+	CoverImage        string  `json:"cover_image"`
+	InstitutionType   string  `json:"institution_type"`
+	CampusSetting     string  `json:"campus_setting"`
+	TuitionMin        int32   `json:"tuition_min"`
+	TuitionMax        int32   `json:"tuition_max"`
+	AcceptanceRate    float64 `json:"acceptance_rate"`
+	IsPopular         bool    `json:"is_popular"`
+	IsFeatured        bool    `json:"is_featured"`
+	IsFavorited       bool    `json:"is_favorited"`
+	HasRepresentative bool    `json:"has_representative"`
 }
 
 type UniversityDetailResponse struct {
@@ -185,18 +186,20 @@ type UniversityDetailResponse struct {
 	SpecialAffiliations []SpecialAffiliationResponse `json:"special_affiliations"`
 	Athletics           []AthleticResponse           `json:"athletics"`
 	SupportServices     []SupportServiceResponse     `json:"support_services"`
+	HasRepresentative   bool                         `json:"has_representative"`
 }
 
 type UniversitySearchResult struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Slug         string `json:"slug"`
-	Country      string `json:"country"`
-	State        string `json:"state"`
-	City         string `json:"city"`
-	FullLocation string `json:"full_location"`
-	Logo         string `json:"logo"`
-	IsFavorited  bool   `json:"is_favorited"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	Slug              string `json:"slug"`
+	Country           string `json:"country"`
+	State             string `json:"state"`
+	City              string `json:"city"`
+	FullLocation      string `json:"full_location"`
+	Logo              string `json:"logo"`
+	IsFavorited       bool   `json:"is_favorited"`
+	HasRepresentative bool   `json:"has_representative"`
 }
 
 type StatsResponse struct {

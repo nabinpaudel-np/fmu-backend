@@ -3,6 +3,7 @@ package claim
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -135,7 +136,10 @@ func (h *ClaimHandler) Approve(w http.ResponseWriter, r *http.Request) {
 			response.Error(w, http.StatusConflict, err.Error())
 		case errors.Is(err, errs.ErrCollegeAlreadyHasRepresentative):
 			response.Error(w, http.StatusConflict, err.Error())
+		case errors.Is(err, errs.ErrUserAlreadyExists):
+			response.Error(w, http.StatusConflict, "a user with this email already exists")
 		default:
+			log.Printf("approve claim %s: %v", id, err)
 			response.Error(w, http.StatusInternalServerError, "something went wrong")
 		}
 		return

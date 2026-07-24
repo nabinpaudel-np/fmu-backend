@@ -6,6 +6,7 @@ var AllowedPurposes = map[string]struct{}{
 	"cover":    {},
 	"gallery":  {},
 	"document": {},
+	"resume":   {},
 }
 
 type SignUploadRequest struct {

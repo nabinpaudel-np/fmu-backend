@@ -35,10 +35,6 @@ LIMIT $2 OFFSET $3;
 SELECT COUNT(*) FROM university_claims
 WHERE university_id = $1 AND status = 'pending';
 
--- name: CountActiveRepresentativeForUniversity :one
-SELECT COUNT(*) FROM users
-WHERE representative_university_id = $1;
-
 -- name: ApproveUniversityClaim :one
 UPDATE university_claims
 SET status = 'approved',

@@ -25,6 +25,8 @@ Backend API for the FMU (Find My University) application. This document covers e
 12. [Favorites endpoints](#favorites-endpoints)
 13. [Claim endpoints](#claim-endpoints)
 14. [Lookup reference data](#lookup-reference-data)
+15. [Frontend integration checklist](#putting-it-all-together--frontend-integration-checklist)
+16. [CORS](#cors)
 
 ---
 
@@ -120,20 +122,21 @@ Cookie: access_token=eyJhbGciOiJIUzI1NiIs...
 
 The frontend does not read or set these cookies. The browser handles storage and attachment; the API server handles rotation and revocation. For cross-origin SPAs, the fetch/axios call must include `credentials: 'include'` (default for same-origin).
 
-The access token is a JWT containing:
+The access token is a JWT containing authorization data. A college-scoped representative token looks like:
 
 ```json
 {
   "user_id": "d3b07384-d9a2-4e0a-b71e-1c9f3e3e0a1b",
   "email": "ada@example.com",
-  "role": "admin",
+  "role": "representative",
+  "rep_col_id": "9a4f1b32-8e57-4c2f-bd63-2e7a8c4f9b10",
   "exp": 1719612345,
   "iat": 1719608745,
   "nbf": 1719608745
 }
 ```
 
-(The server uses this internally. The frontend should call `GET /api/v1/auth/me` on app load to bootstrap user state — see [the endpoint](#get-apiv1authme) below.)
+A university-scoped representative has `rep_uni_id` instead. Students and admins have neither field. The server uses these claims internally; because the cookie is HttpOnly, the frontend should not decode it. Call `GET /api/v1/auth/me` on app load and use the response's `representative_university_id` or `representative_college_id` field instead.
 
 **401 cases (cookie rejected):**
 - `access_token` cookie missing (user is not logged in, or cookie expired and was cleared)
@@ -145,13 +148,15 @@ When you get a 401, call `POST /api/v1/auth/refresh` (no body — the refresh co
 
 ## Roles & permissions
 
-There are three roles:
+There are three roles. A `representative` account is additionally bound to exactly one university or one college:
 
-| Role            | Default? | Can read universities | Can create universities | Can edit a single university |
-|-----------------|----------|-----------------------|-------------------------|-----------------------------|
-| `student`       | Yes (assigned at registration) | Yes | No | No |
-| `representative`| No (created when an admin approves a claim) | Yes | No | Yes — only the university bound to their account |
-| `admin`         | No (must be granted manually) | Yes | Yes | Yes — any university |
+| Role             | How it is created | Write scope |
+|------------------|-------------------|-------------|
+| `student`        | Self-registration | No university or college writes |
+| `representative` | Admin approves a claim | One claimed university **or** one claimed college |
+| `admin`          | Granted manually | Any university or college, plus all `/api/v1/admin/*` routes |
+
+A university-scoped representative can update their bound university and create colleges beneath it. A college-scoped representative can update only their bound college. Both can use the authenticated image upload endpoints.
 
 **Promoting a user to admin** (currently done via SQL — no public endpoint):
 
@@ -161,7 +166,7 @@ UPDATE users SET role = 'admin' WHERE email = 'you@example.com';
 
 The change takes effect on the user's next login (existing session cookies still carry the old `student` role until the access token expires or the user logs in again).
 
-**Representative accounts** are not created by self-registration — they are minted by an admin approving a [university claim](#claim-endpoints). On approval the system creates a `user` row with role `representative`, a UNIQUE binding to one `university_id`, and a one-time plaintext password that the admin emails to the new rep. Only one representative may exist per university (DB-enforced UNIQUE on `users.representative_university_id`). A logged-in representative can edit their own university, create colleges under it, and upload images for it — see [Representative editing rights](#representative-editing-rights) for the full list and scope rules.
+**Representative accounts** are not created by self-registration. An admin creates one by approving a [university or college claim](#claim-endpoints), then securely delivers the one-time plaintext password from the approval response. The login, refresh, and `/auth/me` responses identify the scope with either `representative_university_id` or `representative_college_id`. Only one representative may be bound to each target; the database enforces separate UNIQUE constraints for universities and colleges. See [Representative editing rights](#representative-editing-rights) for the complete scope rules.
 
 **Authorization errors:**
 
@@ -327,10 +332,20 @@ Exchange email + password for an authenticated session. On success the response 
     "user_id": "d3b07384-d9a2-4e0a-b71e-1c9f3e3e0a1b",
     "full_name": "Ada Lovelace",
     "email": "ada@example.com",
-    "avatar": "https://cdn.example.com/avatars/ada.png"
+    "avatar": "https://cdn.example.com/avatars/ada.png",
+    "role": "representative",
+    "representative_college_id": "9a4f1b32-8e57-4c2f-bd63-2e7a8c4f9b10"
   }
 }
 ```
+
+`role` is always present. Representative accounts include exactly one applicable scope field:
+
+- University representative → `representative_university_id`
+- College representative → `representative_college_id`
+- Student or admin → neither field
+
+The inapplicable field is omitted rather than returned as `null` or an empty string. Use the same rule when typing the `/auth/refresh` and `/auth/me` responses.
 
 **Cookies set on success:**
 
@@ -341,7 +356,7 @@ Exchange email + password for an authenticated session. On success the response 
 
 *`Secure` is set when `COOKIE_SECURE=true` (production). Off by default so the cookies work over `http://localhost`.
 
-**Storage recommendation (frontend):** nothing to store. The browser handles the cookies. Render `user_id`, `full_name`, `email`, `avatar` from the response body as needed.
+**Storage recommendation (frontend):** store no token values; the browser handles the cookies. Keep the returned user object in application state and use `role` plus the optional representative scope ID to decide which editing controls to render. Server authorization remains authoritative.
 
 **Curl example:**
 ```bash
@@ -364,7 +379,7 @@ Rotate the session. Reads the `refresh_token` cookie (no request body), invalida
 
 **Request body:** none. The endpoint reads the `refresh_token` cookie from the request.
 
-**Response:** `200 OK` — sets new cookies, returns:
+**Response:** `200 OK` — sets new cookies and returns the same user shape as login:
 ```json
 {
   "success": true,
@@ -372,7 +387,9 @@ Rotate the session. Reads the `refresh_token` cookie (no request body), invalida
     "user_id": "d3b07384-d9a2-4e0a-b71e-1c9f3e3e0a1b",
     "full_name": "Ada Lovelace",
     "email": "ada@example.com",
-    "avatar": "https://cdn.example.com/avatars/ada.png"
+    "avatar": "https://cdn.example.com/avatars/ada.png",
+    "role": "representative",
+    "representative_college_id": "9a4f1b32-8e57-4c2f-bd63-2e7a8c4f9b10"
   }
 }
 ```
@@ -472,10 +489,13 @@ Return the currently-authenticated user. Use this on app load to bootstrap user 
     "full_name": "Ada Lovelace",
     "email": "ada@example.com",
     "avatar": "https://cdn.example.com/avatars/ada.png",
-    "role": "student"
+    "role": "representative",
+    "representative_college_id": "9a4f1b32-8e57-4c2f-bd63-2e7a8c4f9b10"
   }
 }
 ```
+
+A university representative receives `representative_university_id` instead. Student and admin responses omit both representative ID fields.
 
 The data is read fresh from the database on each call (cheap — `users` PK lookup), so avatar/name/role reflect the current state, not just the JWT claims.
 
@@ -491,7 +511,7 @@ curl -b cookies.txt http://localhost:3000/api/v1/auth/me
 
 ## University endpoints
 
-Reads are public. Writes are admin-only.
+Reads are public. Creating a university is admin-only; updating allows an admin or the representative bound to that university.
 
 | Endpoint                                       | Auth   |
 |------------------------------------------------|--------|
@@ -507,8 +527,8 @@ Reads are public. Writes are admin-only.
 | `GET /api/v1/universities/athletics`           | public |
 | `GET /api/v1/universities/support-services`    | public |
 | `GET /api/v1/universities/lookups`             | public |
-| `POST /api/v1/universities`                    | admin  |
-| `PATCH /api/v1/universities/{id}`              | admin  |
+| `POST /api/v1/universities`                    | admin                           |
+| `PATCH /api/v1/universities/{id}`              | admin or matching university rep |
 
 ### GET `/api/v1/universities`
 
@@ -613,7 +633,9 @@ curl 'http://localhost:3000/api/v1/universities?institution_type=private-nonprof
         "tuition_max": 56169,
         "acceptance_rate": 3.9,
         "is_popular": true,
-        "is_featured": true
+        "is_featured": true,
+        "is_favorited": false,
+        "has_representative": true
       }
     ],
     "meta": {
@@ -630,6 +652,8 @@ curl 'http://localhost:3000/api/v1/universities?institution_type=private-nonprof
 > Filter values are translated server-side; the API response is unchanged regardless of which filter slugs you send.
 >
 > Each item carries an `is_favorited` boolean. If the request includes a valid session cookie, items the authenticated student has favorited have `is_favorited: true`; otherwise `false`. Anonymous requests always receive `is_favorited: false`.
+>
+> `has_representative` is viewer-independent. It is `true` when a representative user is already bound to that university and `false` otherwise. Use it to hide the public claim banner; the same field is present on university detail and search responses.
 
 ---
 
@@ -659,7 +683,9 @@ Typo-tolerant search across `name`, `city`, `state`, `country`, and `full_locati
         "state": "MA",
         "city": "Cambridge",
         "full_location": "Cambridge, MA, US",
-        "logo": "https://cdn.example.com/mit-logo.png"
+        "logo": "https://cdn.example.com/mit-logo.png",
+        "is_favorited": false,
+        "has_representative": true
       }
     ]
   }
@@ -773,6 +799,7 @@ Get one university's full details, including all lookup-table references (majors
     ],
     "is_popular": true,
     "is_featured": true,
+    "has_representative": true,
     "created_at": "2026-06-30T13:12:24.915082+05:45",
     "updated_at": "2026-06-30T13:12:24.915082+05:45",
 
@@ -822,6 +849,7 @@ Get one university's full details, including all lookup-table references (majors
 | `campus_size`             | string           | Empty string if not set                            |
 | `gallery_images`          | string[] (URLs)  | Empty array if not set                             |
 | `is_popular`, `is_featured` | bool           | Always present, default false                      |
+| `has_representative`       | bool           | `true` when a representative user is bound; use to hide the claim banner |
 | `created_at`, `updated_at` | string (RFC3339) | Always present                                   |
 | `degree_levels`, `majors`, `study_formats`, `special_affiliations`, `athletics`, `support_services` | `[{id, name}]` | Empty array if none |
 
@@ -949,7 +977,7 @@ Create a new university.
 
 Partial update of an existing university. Send only the fields you want to change — anything omitted is left as-is.
 
-**Auth:** admin only (requires an authenticated admin session cookie)
+**Auth:** admin, or a university-scoped representative whose `representative_university_id` equals the path `{id}`. Admins may update every accepted field. Representatives may update profile data but must not include `name` or `slug`; either key returns `403 Forbidden`.
 
 **Path params:**
 
@@ -1061,7 +1089,11 @@ The whole operation runs inside a single transaction. If any provided lookup ID 
   }
   ```
 - `401` — missing/invalid session cookie
-- `403` — authenticated but role is not `admin`
+- `403` — caller is neither an admin nor the representative bound to this university
+- `403` — a bound representative supplied `name` or `slug`:
+  ```json
+  { "success": false, "error": "representatives cannot change name or slug" }
+  ```
 - `404` — university with that ID does not exist (or `id` is not a valid UUID):
   ```json
   { "success": false, "error": "university not found" }
@@ -1106,7 +1138,14 @@ List colleges affiliated with a specific university. Returns a slim payload — 
         "country": "US",
         "state": "MA",
         "city": "Cambridge",
-        "logo": "https://res.cloudinary.com/<cloud>/image/upload/.../logo/abc.png"
+        "logo": "https://res.cloudinary.com/<cloud>/image/upload/.../logo/abc.png",
+        "cover_image": "https://res.cloudinary.com/<cloud>/image/upload/.../cover/abc.jpg",
+        "institution_type": "Private",
+        "campus_setting": "Urban",
+        "is_popular": true,
+        "is_featured": false,
+        "is_favorited": false,
+        "has_representative": true
       }
     ],
     "meta": {
@@ -1133,15 +1172,16 @@ Results are ordered by `name` ascending. If the parent university exists but has
 
 A college is an institution affiliated to a parent university (e.g. an engineering college under a university). The parent reference is required — every college must point at a real `universities.id`. Deleting a university while colleges still reference it is blocked by the database (`ON DELETE RESTRICT`).
 
-Reads are public. Writes are admin-only.
+Reads are public. Creating a college allows admins and university-scoped representatives; updating allows admins and the representative bound to that college.
 
-| Endpoint                                  | Auth   |
-|-------------------------------------------|--------|
-| `GET /api/v1/colleges`                    | public |
-| `GET /api/v1/colleges/search`             | public |
-| `GET /api/v1/colleges/{id}`               | public |
-| `GET /api/v1/universities/{id}/colleges`  | public |
-| `POST /api/v1/colleges`                   | admin  |
+| Endpoint                                  | Auth                              |
+|-------------------------------------------|-----------------------------------|
+| `GET /api/v1/colleges`                    | public                            |
+| `GET /api/v1/colleges/search`             | public                            |
+| `GET /api/v1/colleges/{id}`               | public                            |
+| `GET /api/v1/universities/{id}/colleges`  | public                            |
+| `POST /api/v1/colleges`                   | admin or matching university rep  |
+| `PATCH /api/v1/colleges/{id}`             | admin or matching college rep     |
 
 ### POST `/api/v1/colleges`
 
@@ -1156,11 +1196,26 @@ Create a new college under an existing parent university.
   "slug": "mit-college-of-engineering",
   "university_id": "125479fb-fccb-43cc-980a-84e1d73117b3",
   "overview": "The engineering undergraduate college affiliated with MIT.",
+  "excerpt": "Engineering education and research in Cambridge.",
   "country": "US",
   "state": "MA",
   "city": "Cambridge",
   "full_location": "Cambridge, MA, US",
-  "logo": "https://res.cloudinary.com/<cloud>/image/upload/v1234/fmu/development/logo/abc.png"
+  "zipcode": "02139",
+  "cover_image": "https://res.cloudinary.com/<cloud>/image/upload/v1234/fmu/development/cover/abc.jpg",
+  "logo": "https://res.cloudinary.com/<cloud>/image/upload/v1234/fmu/development/logo/abc.png",
+  "gallery_images": [
+    "https://res.cloudinary.com/<cloud>/image/upload/v1234/fmu/development/gallery/abc-1.jpg"
+  ],
+  "institution_type": "Private",
+  "campus_setting": "Urban",
+  "contact_email": "engineering@mit.edu",
+  "contact_phone": "+1-617-253-1000",
+  "website": "https://engineering.mit.edu",
+  "founded_year": 1932,
+  "campus_size": "Cambridge campus",
+  "is_popular": true,
+  "is_featured": false
 }
 ```
 
@@ -1171,9 +1226,15 @@ Create a new college under an existing parent university.
 - `overview` — non-empty
 
 **Optional, validated if present:**
+- `excerpt` — max 500 chars
 - `country`, `state`, `city` — max 100 chars
-- `full_location` — max 255 chars
-- `logo` — must be a valid URL. The expected workflow is to upload first via `POST /api/v1/uploads/sign` (browser → Cloudinary direct), then pass the returned `secure_url` here. See [Uploads endpoints](#uploads-endpoints).
+- `full_location` — max 255 chars; `zipcode` — max 20 chars
+- `cover_image`, `logo`, and every `gallery_images[]` item — valid URL. Upload images first through `POST /api/v1/uploads/sign`, then store the returned `secure_url` values. See [Uploads endpoints](#uploads-endpoints).
+- `institution_type`, `campus_setting` — max 50 chars
+- `contact_email` — valid email, max 255 chars; `contact_phone` — max 50 chars
+- `website` — valid URL, max 500 chars
+- `founded_year` — integer from 1000 through 2100; `campus_size` — max 100 chars
+- `is_popular`, `is_featured` — booleans, default `false`
 
 **Response:** `201 Created`
 ```json
@@ -1185,11 +1246,26 @@ Create a new college under an existing parent university.
     "slug": "mit-college-of-engineering",
     "university_id": "125479fb-fccb-43cc-980a-84e1d73117b3",
     "overview": "The engineering undergraduate college affiliated with MIT.",
+    "excerpt": "Engineering education and research in Cambridge.",
     "country": "US",
     "state": "MA",
     "city": "Cambridge",
     "full_location": "Cambridge, MA, US",
+    "zipcode": "02139",
+    "cover_image": "https://res.cloudinary.com/<cloud>/image/upload/v1234/fmu/development/cover/abc.jpg",
     "logo": "https://res.cloudinary.com/<cloud>/image/upload/v1234/fmu/development/logo/abc.png",
+    "gallery_images": [
+      "https://res.cloudinary.com/<cloud>/image/upload/v1234/fmu/development/gallery/abc-1.jpg"
+    ],
+    "institution_type": "Private",
+    "campus_setting": "Urban",
+    "contact_email": "engineering@mit.edu",
+    "contact_phone": "+1-617-253-1000",
+    "website": "https://engineering.mit.edu",
+    "founded_year": 1932,
+    "campus_size": "Cambridge campus",
+    "is_popular": true,
+    "is_featured": false,
     "created_at": "2026-07-06T15:00:00Z",
     "updated_at": "2026-07-06T15:00:00Z"
   }
@@ -1259,7 +1335,14 @@ curl 'http://localhost:3000/api/v1/colleges?university_id=125479fb-fccb-43cc-980
         "country": "US",
         "state": "MA",
         "city": "Cambridge",
-        "logo": "https://res.cloudinary.com/<cloud>/image/upload/v1234/fmu/development/logo/abc.png"
+        "logo": "https://res.cloudinary.com/<cloud>/image/upload/v1234/fmu/development/logo/abc.png",
+        "cover_image": "https://res.cloudinary.com/<cloud>/image/upload/v1234/fmu/development/cover/abc.jpg",
+        "institution_type": "Private",
+        "campus_setting": "Urban",
+        "is_popular": true,
+        "is_featured": false,
+        "is_favorited": false,
+        "has_representative": true
       }
     ],
     "meta": {
@@ -1275,6 +1358,8 @@ curl 'http://localhost:3000/api/v1/colleges?university_id=125479fb-fccb-43cc-980
 Results are ordered by `name` ascending. College list items do **not** embed the parent university — if the UI needs the parent name in card view, fetch `GET /api/v1/universities/{university_id}` per item or use `/search` (which embeds it).
 
 > Each item carries an `is_favorited` boolean. If the request includes a valid session cookie, items the authenticated student has favorited have `is_favorited: true`; otherwise `false`. Same rule applies to `/api/v1/colleges/search` and `/api/v1/universities/{id}/colleges`.
+>
+> Every college list item also includes `has_representative`. It is `true` when a representative user is bound to the college and is independent of the viewer. Hide the claim banner when this value is `true`; the same field is returned by college detail and search endpoints.
 
 ---
 
@@ -1323,7 +1408,9 @@ The endpoint joins to the parent university, so a single `q` finds both "College
         "country": "US",
         "state": "MA",
         "city": "Cambridge",
-        "logo": "https://res.cloudinary.com/<cloud>/image/upload/v1234/fmu/development/colleges/abc.png"
+        "logo": "https://res.cloudinary.com/<cloud>/image/upload/v1234/fmu/development/colleges/abc.png",
+        "is_favorited": false,
+        "has_representative": true
       }
     ]
   }
@@ -1379,11 +1466,27 @@ Get one college's full details.
     "slug": "mit-college-of-engineering",
     "university_id": "125479fb-fccb-43cc-980a-84e1d73117b3",
     "overview": "The engineering undergraduate college affiliated with MIT.",
+    "excerpt": "Engineering education and research in Cambridge.",
     "country": "US",
     "state": "MA",
     "city": "Cambridge",
     "full_location": "Cambridge, MA, US",
+    "zipcode": "02139",
+    "cover_image": "https://res.cloudinary.com/<cloud>/image/upload/v1234/fmu/development/cover/abc.jpg",
     "logo": "https://res.cloudinary.com/<cloud>/image/upload/v1234/fmu/development/logo/abc.png",
+    "gallery_images": [
+      "https://res.cloudinary.com/<cloud>/image/upload/v1234/fmu/development/gallery/abc-1.jpg"
+    ],
+    "institution_type": "Private",
+    "campus_setting": "Urban",
+    "contact_email": "engineering@mit.edu",
+    "contact_phone": "+1-617-253-1000",
+    "website": "https://engineering.mit.edu",
+    "founded_year": 1932,
+    "campus_size": "Cambridge campus",
+    "is_popular": true,
+    "is_featured": false,
+    "has_representative": true,
     "created_at": "2026-07-06T15:00:00Z",
     "updated_at": "2026-07-06T15:00:00Z"
   }
@@ -1396,14 +1499,140 @@ Get one college's full details.
 | `name`, `slug`    | string           | Always present                              |
 | `university_id`   | UUID             | Parent university                           |
 | `overview`        | string           | Always present                              |
-| `country`, `state`, `city`, `full_location` | string | Empty string if not set          |
-| `logo`            | string (URL)     | Empty string if not set                     |
-| `created_at`, `updated_at` | string (RFC3339) | Always present                          |
+| `excerpt`         | string           | Empty string if not set                     |
+| `country`, `state`, `city`, `full_location`, `zipcode` | string | Empty string if not set |
+| `cover_image`, `logo` | string (URL) | Empty string if not set                     |
+| `gallery_images`  | string[] (URLs)  | College gallery images                      |
+| `institution_type`, `campus_setting` | string | Empty string if not set             |
+| `contact_email`, `contact_phone`, `website` | string | Empty string if not set          |
+| `founded_year`    | number           | `0` if not set                              |
+| `campus_size`     | string           | Empty string if not set                     |
+| `is_popular`, `is_featured` | bool  | Always present, default `false`              |
+| `has_representative` | bool         | `true` when a representative is bound; use to hide the claim banner |
+| `created_at`, `updated_at` | string (RFC3339) | Always present                    |
 
 **Errors:**
 - `404` — college with that ID does not exist
   ```json
   { "success": false, "error": "college not found" }
+  ```
+
+---
+
+### PATCH `/api/v1/colleges/{id}`
+
+Partially update a college. Fetch the current record with `GET /api/v1/colleges/{id}`, send only changed fields, and replace local state with the returned record.
+
+**Auth:** admin, or a college-scoped representative whose `representative_college_id` equals the path `{id}`. Admins may update every accepted field. Representatives may update profile data but must not include `name` or `slug`; either key returns `403 Forbidden`. A university-scoped representative cannot use this route.
+
+**Path params:**
+
+| Param | Type | Notes |
+|-------|------|-------|
+| `id`  | UUID | College's primary key |
+
+**Request body:** every field is optional.
+
+```json
+{
+  "overview": "Updated overview.",
+  "city": "Cambridge",
+  "contact_phone": "+1-617-253-1000",
+  "website": "https://engineering.mit.edu",
+  "cover_image": "https://res.cloudinary.com/<cloud>/image/upload/v1234/fmu/development/cover/new-cover.jpg"
+}
+```
+
+| Field | Type | Validation |
+|-------|------|------------|
+| `name` | string | 1–255 chars; admin only |
+| `slug` | string | 2–255 chars, unique across colleges; admin only |
+| `overview` | string | min 1 char |
+| `excerpt` | string | max 500 chars |
+| `country`, `state`, `city` | string | max 100 chars |
+| `full_location` | string | max 255 chars |
+| `zipcode` | string | max 20 chars |
+| `cover_image`, `logo` | string | valid URL |
+| `gallery_images` | string[] | every item must be a valid URL |
+| `institution_type`, `campus_setting` | string | max 50 chars |
+| `contact_email` | string | valid email, max 255 chars |
+| `contact_phone` | string | max 50 chars |
+| `website` | string | valid URL, max 500 chars |
+| `founded_year` | integer | 1000–2100 |
+| `campus_size` | string | max 100 chars |
+| `is_popular`, `is_featured` | boolean | no additional validation |
+
+Partial-update rules:
+
+- Omitted field → unchanged.
+- JSON `null` → unchanged.
+- Empty string for an optional location or logo field → stores an empty string, which clears it from the frontend's perspective.
+- `{}` is valid and returns the current record without changing it.
+- `university_id` is not accepted by this endpoint; a college cannot be moved to a different parent university.
+- Admins may send `name` and `slug`. College representatives must omit both fields, even when sending the current unchanged value.
+
+**Example:**
+
+```bash
+curl -b cookies.txt -X PATCH http://localhost:3000/api/v1/colleges/9a4f1b32-8e57-4c2f-bd63-2e7a8c4f9b10 \
+  -H "Content-Type: application/json" \
+  -d '{"overview":"Updated overview.","contact_phone":"+1-617-253-1000","website":"https://engineering.mit.edu"}'
+```
+
+**Response:** `200 OK` — full updated college record in the same shape as the create response. Mutation responses do not include `has_representative`; preserve the value already in client state or refetch `GET /api/v1/colleges/{id}`.
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "9a4f1b32-8e57-4c2f-bd63-2e7a8c4f9b10",
+    "name": "MIT College of Engineering",
+    "slug": "mit-college-of-engineering",
+    "university_id": "125479fb-fccb-43cc-980a-84e1d73117b3",
+    "overview": "Updated overview.",
+    "excerpt": "Engineering education and research in Cambridge.",
+    "country": "US",
+    "state": "MA",
+    "city": "Cambridge",
+    "full_location": "Cambridge, MA, US",
+    "zipcode": "02139",
+    "cover_image": "https://res.cloudinary.com/<cloud>/image/upload/v1234/fmu/development/cover/abc.jpg",
+    "logo": "https://res.cloudinary.com/<cloud>/image/upload/v1234/fmu/development/logo/abc.png",
+    "gallery_images": [],
+    "institution_type": "Private",
+    "campus_setting": "Urban",
+    "contact_email": "engineering@mit.edu",
+    "contact_phone": "+1-617-253-1000",
+    "website": "https://engineering.mit.edu",
+    "founded_year": 1932,
+    "campus_size": "Cambridge campus",
+    "is_popular": true,
+    "is_featured": false,
+    "created_at": "2026-07-06T15:00:00Z",
+    "updated_at": "2026-07-23T12:00:00Z"
+  }
+}
+```
+
+**Errors:**
+
+- `400` — malformed JSON or field validation failure
+- `401` — missing or invalid session cookie
+- `403` — caller is neither an admin nor the representative bound to this college:
+  ```json
+  { "success": false, "error": "forbidden" }
+  ```
+- `403` — a bound college representative supplied `name` or `slug`:
+  ```json
+  { "success": false, "error": "representatives cannot change name or slug" }
+  ```
+- `404` — college does not exist:
+  ```json
+  { "success": false, "error": "college not found" }
+  ```
+- `409` — `slug` belongs to another college:
+  ```json
+  { "success": false, "error": "college with this slug already exists (slug=mit-college-of-engineering)" }
   ```
 
 ---
@@ -1681,37 +1910,57 @@ request. Items are ordered by favorite-time, newest first. Supports
 
 ## Claim endpoints
 
-Anyone can submit a claim to become the official representative of a
-university; admins review them in a dashboard. Approving a claim creates a
-new `user` with the `representative` role, bound to that one university, and
-returns a one-time plaintext password the admin must deliver manually.
+Anyone can submit a claim to become the official representative of a university or college. Admins review both target types in one dashboard. Approving a claim creates a new `representative` user bound to that one target and returns a one-time plaintext password the admin must deliver securely.
 
-**Public:**
+**Public submission:**
 
-| Method | Path                                              | Description                       |
-|--------|---------------------------------------------------|-----------------------------------|
-| POST   | `/api/v1/claims/universities/{id}`                | Submit a claim for a university (anonymous + non-student, non-admin authenticated) |
+| Method | Path                                      | Description |
+|--------|-------------------------------------------|-------------|
+| POST   | `/api/v1/claims/universities/{id}`        | Claim a university |
+| POST   | `/api/v1/claims/colleges/{id}`            | Claim a college |
+
+Both routes allow anonymous callers and authenticated callers whose role is neither `student` nor `admin`.
 
 **Admin only** (require the `admin` role):
 
-| Method | Path                                                    | Description                                    |
-|--------|---------------------------------------------------------|------------------------------------------------|
-| GET    | `/api/v1/admin/claims`                                  | List claims (paginated, filter by `?status=`)  |
-| GET    | `/api/v1/admin/claims/{id}`                             | Get a single claim                             |
-| POST   | `/api/v1/admin/claims/{id}/approve`                     | Approve a claim, mint a representative account |
-| POST   | `/api/v1/admin/claims/{id}/reject`                      | Reject a claim                                 |
+| Method | Path                                    | Description |
+|--------|-----------------------------------------|-------------|
+| GET    | `/api/v1/admin/claims`                  | List claims; filter by `type` and `status` |
+| GET    | `/api/v1/admin/claims/{id}`             | Get a single university or college claim |
+| POST   | `/api/v1/admin/claims/{id}/approve`     | Approve a claim and create its representative account |
+| POST   | `/api/v1/admin/claims/{id}/reject`      | Reject a claim |
 
 ### Submit a claim
 
-Anyone (authenticated or not) can file a claim. The `document_url` is the
-result of a separate `POST /api/v1/uploads/document?purpose=document` call —
-only PDFs are accepted on that endpoint. The upload endpoint is fully
-public (no auth required) so anonymous claim submitters can upload their
-verification PDF without first having to register an account. The 20 MiB
-file-size cap is the only abuse floor.
+Choose the route from the target type; both accept the same JSON body:
+
+- University: `POST /api/v1/claims/universities/{university_id}`
+- College: `POST /api/v1/claims/colleges/{college_id}`
+
+The `document_url` comes from a separate public `POST /api/v1/uploads/document?purpose=document` upload. That upload accepts PDF files up to 20 MiB and returns the URL as `data.secure_url`.
+
+**Request body:**
+
+```json
+{
+  "full_name": "Ada Lovelace",
+  "work_email": "ada@mit.edu",
+  "document_url": "https://abcdefghijk.supabase.co/storage/v1/object/public/documents/4f8b2c1d9e3a7f6b5c0d2e8a1b9c4d7e.pdf"
+}
+```
+
+| Field | Type | Rules |
+|-------|------|-------|
+| `full_name` | string | required, 2–255 chars |
+| `work_email` | string | required, valid email, max 255 chars |
+| `document_url` | string | required, valid URL, max 500 chars |
+
+`full_name` and `work_email` are trimmed before storage.
+
+**College example:**
 
 ```bash
-curl -X POST http://localhost:3000/api/v1/claims/universities/<uuid> \
+curl -X POST http://localhost:3000/api/v1/claims/colleges/9a4f1b32-8e57-4c2f-bd63-2e7a8c4f9b10 \
   -H "Content-Type: application/json" \
   -d '{
     "full_name": "Ada Lovelace",
@@ -1720,84 +1969,163 @@ curl -X POST http://localhost:3000/api/v1/claims/universities/<uuid> \
   }'
 ```
 
-Response (`201 Created`):
+**Response:** `201 Created`
+
 ```json
 {
   "success": true,
   "data": {
-    "claim_id": "f8b6...-...",
-    "university_id": "<uuid>",
+    "claim_id": "f8b6d642-8c31-4dc8-9ef2-195ba74a8b97",
+    "type": "college",
+    "target_id": "9a4f1b32-8e57-4c2f-bd63-2e7a8c4f9b10",
     "status": "pending",
-    "created_at": "2026-07-20T10:55:59Z"
+    "created_at": "2026-07-23T10:55:59Z"
   }
 }
 ```
 
-Errors:
-- `404 university not found` — the path UUID doesn't match any university
-- `400` — invalid request body / validation errors
-- `403 only non-student, non-admin users may submit a claim` — the request was authenticated as `student` or `admin`. Anonymous and `representative` callers pass.
+The response uses the same shape for both routes. `type` is `"university"` or `"college"`; `target_id` is the claimed entity's ID.
+
+**Errors:**
+
+- `400` — malformed JSON or validation failure
+- `403` — the request has a valid session for a `student` or `admin`:
+  ```json
+  { "success": false, "error": "only non-student, non-admin users may submit a claim" }
+  ```
+- `404` — the path ID does not identify an entity for the selected route:
+  ```json
+  { "success": false, "error": "target not found" }
+  ```
 
 ### List claims (admin)
 
 ```bash
-curl -b cookies.txt 'http://localhost:3000/api/v1/admin/claims?status=pending&page=1&page_size=20'
+curl -b cookies.txt 'http://localhost:3000/api/v1/admin/claims?type=college&status=pending&page=1&page_size=20'
 ```
 
-`status` is optional; valid values are `pending`, `approved`, `rejected`.
-Omit to list all.
+**Query params:**
 
-Response (`200 OK`):
+| Param | Required | Values / behavior |
+|-------|----------|-------------------|
+| `type` | no | `university` or `college`; omit to include both tables |
+| `status` | no | `pending`, `approved`, or `rejected`; omit for every status |
+| `page` | no | default `1` |
+| `page_size` | no | default `20`, max `100` |
+
+**Response:** `200 OK`
+
 ```json
 {
   "success": true,
   "data": {
     "items": [
       {
-        "id": "f8b6...",
-        "university_id": "...",
-        "university_name": "MIT",
+        "id": "f8b6d642-8c31-4dc8-9ef2-195ba74a8b97",
+        "type": "college",
+        "target_id": "9a4f1b32-8e57-4c2f-bd63-2e7a8c4f9b10",
+        "target_name": "MIT College of Engineering",
         "full_name": "Ada Lovelace",
         "work_email": "ada@mit.edu",
         "document_url": "https://abcdefghijk.supabase.co/storage/v1/object/public/documents/4f8b2c1d9e3a7f6b5c0d2e8a1b9c4d7e.pdf",
         "status": "pending",
-        "created_at": "2026-07-20T10:55:59Z",
-        "updated_at": "2026-07-20T10:55:59Z"
+        "created_at": "2026-07-23T10:55:59Z",
+        "updated_at": "2026-07-23T10:55:59Z"
       }
     ],
-    "meta": { "page": 1, "page_size": 20, "total": 1, "total_pages": 1 }
+    "meta": {
+      "page": 1,
+      "page_size": 20,
+      "total": 1,
+      "total_pages": 1
+    }
   }
 }
 ```
 
-`university_name` is JOINed in from the `universities` table so the admin dashboard can render the claim list without a second round-trip per row. `full_name` is exactly what the claimant typed — no trimming or normalization.
+Use `type` to choose the target icon, detail URL, and representative scope. `target_name` is joined from `universities` or `colleges`, so no extra request is needed for a moderation row.
+
+This unified shape replaces the older university-specific `university_id` and `university_name` keys. Every claim item now uses:
+
+```ts
+type ClaimTarget = 'university' | 'college'
+
+type ClaimItem = {
+  id: string
+  type: ClaimTarget
+  target_id: string
+  target_name: string
+  full_name: string
+  work_email: string
+  document_url: string
+  status: 'pending' | 'approved' | 'rejected'
+  reviewer_id?: string
+  reviewed_at?: string
+  review_note?: string
+  created_user_id?: string
+  created_at: string
+  updated_at: string
+}
+```
+
+The review fields are omitted while they have no value; do not require them on pending rows.
+
+For stable pagination, pass `type`. When `type` is omitted, the service queries each claim table with the same page settings and appends university results before college results. In that combined mode, `meta.total` is exact, but ordering and page boundaries are not global and `items` may contain up to twice `page_size`.
+
+**Errors:**
+
+- `400` with `type must be one of: university, college`
+- `400` with `status must be one of: pending, approved, rejected`
+- `401` — missing or invalid session
+- `403` — authenticated user is not an admin
+
+### Get one claim (admin)
+
+```bash
+curl -b cookies.txt http://localhost:3000/api/v1/admin/claims/f8b6d642-8c31-4dc8-9ef2-195ba74a8b97
+```
+
+**Response:** `200 OK` with one `ClaimItem` in `data`. The server finds the target type from the claim ID, so no `type` query parameter is needed.
+
+**Errors:**
+
+- `404` — `{ "success": false, "error": "claim not found" }`
+- `401` — missing or invalid session
+- `403` — authenticated user is not an admin
 
 ### Approve a claim (admin)
 
-Approving creates a new `representative` user. The response contains the
-plaintext password **exactly once** — the admin must email it to the new
-representative. The password is never returned again.
+Approving creates a new `representative` user bound to the claim's `target_id`. The response contains the plaintext password **exactly once** — capture it immediately and deliver it securely to the representative.
+
+The body must be a JSON object. `review_note` is optional and has a maximum length of 1,000 characters; send `{}` when there is no note.
 
 ```bash
-curl -b cookies.txt -X POST http://localhost:3000/api/v1/admin/claims/<uuid>/approve \
+curl -b cookies.txt -X POST http://localhost:3000/api/v1/admin/claims/f8b6d642-8c31-4dc8-9ef2-195ba74a8b97/approve \
   -H "Content-Type: application/json" \
-  -d '{"review_note": "Verified MIT employee via HR letter."}'
+  -d '{"review_note":"Verified employee via HR letter."}'
 ```
 
-Response (`200 OK`):
+**Response:** `200 OK`
+
 ```json
 {
   "success": true,
   "data": {
     "claim": {
-      "id": "f8b6...",
-      "university_id": "...",
+      "id": "f8b6d642-8c31-4dc8-9ef2-195ba74a8b97",
+      "type": "college",
+      "target_id": "9a4f1b32-8e57-4c2f-bd63-2e7a8c4f9b10",
+      "target_name": "MIT College of Engineering",
+      "full_name": "Ada Lovelace",
+      "work_email": "ada@mit.edu",
+      "document_url": "https://abcdefghijk.supabase.co/storage/v1/object/public/documents/4f8b2c1d9e3a7f6b5c0d2e8a1b9c4d7e.pdf",
       "status": "approved",
       "reviewer_id": "<admin-uuid>",
-      "reviewed_at": "2026-07-20T11:00:00Z",
-      "review_note": "Verified MIT employee via HR letter.",
+      "reviewed_at": "2026-07-23T11:00:00Z",
+      "review_note": "Verified employee via HR letter.",
       "created_user_id": "<new-rep-uuid>",
-      "..."
+      "created_at": "2026-07-23T10:55:59Z",
+      "updated_at": "2026-07-23T11:00:00Z"
     },
     "created_user_id": "<new-rep-uuid>",
     "email": "ada@mit.edu",
@@ -1807,63 +2135,354 @@ Response (`200 OK`):
 }
 ```
 
-Errors:
-- `404 claim not found`
-- `409 claim has already been reviewed` — only pending claims can be approved
-- `409 university already has a representative` — DB-enforced UNIQUE on
-  `users.representative_university_id` (one rep per university)
+The new user receives `representative_university_id = target_id` for a university claim or `representative_college_id = target_id` for a college claim. The representative can log in immediately with `email` and `plain_password`.
+
+After a successful approval the backend sends a credentials email to the address on the claim (the new representative's `email`). Delivery is best-effort — when SMTP is not configured the app falls back to a no-op sender and the API response is unchanged. Configure the `MAIL_*` environment variables (see `.env`) to enable real delivery; the email contains the same `email` and `plain_password` returned here.
+
+**Errors:**
+
+- `400` — malformed body or `review_note` exceeds 1,000 characters
+- `404` — claim not found
+- `409` — claim has already been reviewed
+- `409` — university already has a representative
+- `409` — college already has a representative
+- `401` — missing or invalid session
+- `403` — authenticated user is not an admin
 
 ### Reject a claim (admin)
 
+The body follows the same rules as approval: send a JSON object, with an optional `review_note` up to 1,000 characters.
+
 ```bash
-curl -b cookies.txt -X POST http://localhost:3000/api/v1/admin/claims/<uuid>/reject \
+curl -b cookies.txt -X POST http://localhost:3000/api/v1/admin/claims/f8b6d642-8c31-4dc8-9ef2-195ba74a8b97/reject \
   -H "Content-Type: application/json" \
-  -d '{"review_note": "Document did not verify."}'
+  -d '{"review_note":"Document did not verify employment."}'
 ```
 
-Response (`200 OK`):
+**Response:** `200 OK`
+
 ```json
 {
   "success": true,
   "data": {
     "claim": {
-      "id": "f8b6...",
+      "id": "f8b6d642-8c31-4dc8-9ef2-195ba74a8b97",
+      "type": "college",
+      "target_id": "9a4f1b32-8e57-4c2f-bd63-2e7a8c4f9b10",
+      "target_name": "MIT College of Engineering",
+      "full_name": "Ada Lovelace",
+      "work_email": "ada@mit.edu",
+      "document_url": "https://abcdefghijk.supabase.co/storage/v1/object/public/documents/4f8b2c1d9e3a7f6b5c0d2e8a1b9c4d7e.pdf",
       "status": "rejected",
       "reviewer_id": "<admin-uuid>",
-      "reviewed_at": "2026-07-20T11:00:00Z",
-      "review_note": "Document did not verify.",
-      "..."
+      "reviewed_at": "2026-07-23T11:00:00Z",
+      "review_note": "Document did not verify employment.",
+      "created_at": "2026-07-23T10:55:59Z",
+      "updated_at": "2026-07-23T11:00:00Z"
     }
   }
 }
 ```
 
-Errors:
-- `404 claim not found`
-- `409 claim has already been reviewed`
+**Errors:**
+
+- `400` — malformed body or `review_note` exceeds 1,000 characters
+- `404` — claim not found
+- `409` — claim has already been reviewed
+- `401` — missing or invalid session
+- `403` — authenticated user is not an admin
 
 ### Representative editing rights
 
-Once a representative logs in, their access token carries a `representative_university_id` claim. From that point they can manage **their own** university's content with the same endpoints an admin uses — the only difference is scope: an admin operates on any university, a representative is locked to the one bound to their account.
+After login, use `role` and the optional scope IDs from `/auth/login`, `/auth/refresh`, or `/auth/me` to render editing controls:
 
-**What a representative can do:**
+```ts
+type SessionUser = {
+  user_id: string
+  full_name: string
+  email: string
+  avatar?: string
+  role: 'student' | 'representative' | 'admin'
+  representative_university_id?: string
+  representative_college_id?: string
+}
+```
 
-| Endpoint | Gate | How the scope is enforced |
-|----------|------|---------------------------|
-| `PATCH /api/v1/universities/{id}` | `RequireUniversityEditor` | The URL `{id}` must equal the caller's `representative_university_id`. Mismatch → `403`. |
-| `POST /api/v1/colleges` | admin or representative | The request body `university_id` must equal the caller's `representative_university_id`. Mismatch → `403 representative can only edit their own university`. |
-| `POST /api/v1/uploads/sign` | admin or representative | No binding at upload time — the returned Cloudinary URL only takes effect when it is saved via a `PATCH`/`POST` that is itself scope-checked. |
-| `POST /api/v1/uploads/image` | admin or representative | Same as `/sign`. |
+A representative account created from a claim has one scope ID, never both. The server copies that binding into the HttpOnly access token and enforces it on every write.
 
-`POST /api/v1/uploads/document` remains fully public (used by the anonymous claim flow) and is not part of representative-scoped editing.
+| Account scope | Endpoint | Enforcement |
+|---------------|----------|-------------|
+| University representative | `PATCH /api/v1/universities/{id}` | Path `{id}` must equal `representative_university_id`; `name` and `slug` are admin-only |
+| University representative | `POST /api/v1/colleges` | Body `university_id` must equal `representative_university_id` |
+| College representative | `PATCH /api/v1/colleges/{id}` | Path `{id}` must equal `representative_college_id`; `name` and `slug` are admin-only |
+| Either representative scope | `POST /api/v1/uploads/sign` | Role-gated; the uploaded URL is authorized when saved through a scoped write |
+| Either representative scope | `POST /api/v1/uploads/image` | Same as `/uploads/sign` |
 
-**What a representative cannot do:** create a new university (`POST /api/v1/universities`), read admin stats (`GET /api/v1/universities/stats`), touch a university other than their own, or access any `/api/v1/admin/*` route. All of these return `403`.
+Admins may use every endpoint in the table for any target. Scope is still checked server-side, so hiding a button in the UI is only a usability improvement, not an authorization control.
 
-**Scope-mismatch error shape** (rep acting outside their university):
+Public university and college detail, list, and search payloads include `has_representative`. When it is `true`, remove or disable the "claim this institution" banner; do not query the admin claims feed to infer ownership.
+
+Important distinctions:
+
+- A university representative may create colleges under their university but cannot patch those colleges unless separately bound as that college's representative.
+- A college representative may patch their college but cannot patch its parent university or create another college.
+- Representatives must omit `name` and `slug` from university and college PATCH bodies. Supplying either key returns `403`, even if its value is unchanged.
+- Representatives cannot create universities, read university admin stats, review claims, or access any `/api/v1/admin/*` route.
+- `POST /api/v1/uploads/document` remains public because it supports anonymous claim submission.
+
+A path-scope mismatch returns:
+
+```json
+{ "success": false, "error": "forbidden" }
+```
+
+A university representative sending another university's ID in `POST /api/v1/colleges` returns:
+
 ```json
 { "success": false, "error": "representative can only edit their own university" }
 ```
 
+---
+
+## Counselling endpoints
+
+Two flavours of free-counselling form, both fully public — no authentication required to submit:
+
+1. **General counselling** — not tied to any institution. Carries a free-text `preferred_country`, an optional `preferred_university` name, and an optional resume upload.
+2. **Institution-specific counselling** — submitted from a university or college detail page. Carries richer academic context (program of interest, start term, current education, test scores, free-form message). `phone` and `start_term` are required.
+
+Both rows are visible to admins. Institution-specific rows are also visible to that institution's representative so they can follow up; representatives can also update status. General rows are admin-only because they have no natural owner.
+
+### Resume upload
+
+Before submitting a general counselling request with a resume, the frontend uploads the file and captures `secure_url`:
+
+### POST `/api/v1/uploads/resume`
+
+Upload a CV/resume to Supabase Storage. Accepts **PDF, DOC, DOCX** (max **5 MiB**). Filename extension is what gates acceptance — `http.DetectContentType` misclassifies DOC/DOCX, so the handler sniffs by extension. The returned `secure_url` is what the counselling form submits as `resume_url`.
+
+**All auth:** public
+
+**Request:**
+```bash
+curl -X POST http://localhost:3000/api/v1/uploads/resume \
+  -F "file=@/path/to/cv.pdf"
+```
+
+**Response 201:**
+```json
+{
+  "success": true,
+  "data": {
+    "secure_url": "https://<project>.supabase.co/storage/v1/object/public/documents/<hex>.pdf",
+    "path": "documents/<hex>.pdf",
+    "bytes": 102400
+  }
+}
+```
+
+**Errors:**
+- `400` — invalid multipart form, missing `file`, empty file
+- `413` — file exceeds 5 MiB
+- `415` — file extension is not `.pdf`, `.doc`, or `.docx`
+- `502` — Supabase upload failed
+
+### Submit a general counselling request
+
+### POST `/api/v1/counselling/general`
+
+Public submit endpoint for the home-page "Free Counselling" form.
+
+**All auth:** public
+
+**Request body:**
+```json
+{
+  "full_name": "John Smith",
+  "email": "john@example.com",
+  "phone": "+1 234 567 8900",
+  "country": "United States",
+  "preferred_university": "Harvard, MIT, ... (optional)",
+  "resume_url": "https://<project>.supabase.co/.../cv.pdf"
+}
+```
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `full_name` | yes | 2–255 chars |
+| `email` | yes | valid email |
+| `phone` | no | ≤ 50 chars |
+| `country` | yes | 2–100 chars — preferred study country |
+| `preferred_university` | no | ≤ 255 chars |
+| `resume_url` | no | URL returned by `/uploads/resume` |
+
+**Response 201:**
+```json
+{
+  "success": true,
+  "data": {
+    "inquiry_id": "uuid",
+    "type": "general",
+    "status": "pending",
+    "created_at": "2026-07-25T10:00:00Z"
+  }
+}
+```
+
+### Submit an institution-specific counselling request
+
+### POST `/api/v1/counselling/universities/{id}`
+
+### POST `/api/v1/counselling/colleges/{id}`
+
+Public submit endpoints for the "Request Free Counselling" form on university and college detail pages. The `{id}` path segment is the target institution's UUID; the response carries it back in `target_id`.
+
+**All auth:** public
+
+**Request body:**
+```json
+{
+  "full_name": "John Smith",
+  "email": "john@example.com",
+  "phone": "+1 (555) 000-0000",
+  "country": "United States",
+  "program_of_interest": "Computer Science",
+  "start_term": "Fall 2027",
+  "current_education": "High School Senior",
+  "test_scores": "SAT: 1400, ACT: 32",
+  "message": "Looking for scholarships in CS..."
+}
+```
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `full_name` | yes | 2–255 chars |
+| `email` | yes | valid email |
+| `phone` | yes | 4–50 chars |
+| `country` | no | ≤ 100 chars — applicant's country |
+| `program_of_interest` | no | ≤ 255 chars |
+| `start_term` | yes | 1–100 chars |
+| `current_education` | no | ≤ 100 chars |
+| `test_scores` | no | ≤ 1000 chars |
+| `message` | no | ≤ 5000 chars |
+
+**Response 201:**
+```json
+{
+  "success": true,
+  "data": {
+    "inquiry_id": "uuid",
+    "type": "university",
+    "target_id": "uuid-of-the-target-institution",
+    "status": "pending",
+    "created_at": "2026-07-25T10:00:00Z"
+  }
+}
+```
+
+**Errors:**
+- `400` — missing required field (e.g. `phone` or `start_term`)
+- `404` — `{id}` does not match a university / college
+
+### Status workflow
+
+`pending` (default) → `reviewed` → `archived`. The PATCH endpoint accepts only `reviewed` or `archived`; once touched, a row cannot go back to `pending`. `reviewed_at` is stamped on the first transition to `reviewed` and stays set thereafter. `reviewer_id` is stamped to the calling user.
+
+### List counselling inquiries (admin)
+
+### GET `/api/v1/admin/counselling`
+
+Paginated list. Admins see everything; `?type=` and `?status=` narrow the feed.
+
+**Auth:** admin
+
+**Query parameters:**
+
+| Param | Type | Default | Notes |
+|-------|------|---------|-------|
+| `type` | enum | (all) | `general`, `university`, `college` |
+| `status` | enum | (all) | `pending`, `reviewed`, `archived` |
+| `page` | int | 1 | |
+| `page_size` | int | 20 | max 100 |
+
+**Response 200:**
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "uuid",
+        "type": "university",
+        "target_id": "uuid",
+        "target_name": "Stanford University",
+        "full_name": "John Smith",
+        "email": "john@example.com",
+        "phone": "+1 555 000 0000",
+        "country": "United States",
+        "program_of_interest": "Computer Science",
+        "start_term": "Fall 2027",
+        "current_education": "High School Senior",
+        "test_scores": "SAT: 1400",
+        "message": "...",
+        "status": "pending",
+        "created_at": "2026-07-25T10:00:00Z",
+        "updated_at": "2026-07-25T10:00:00Z"
+      }
+    ],
+    "meta": { "page": 1, "page_size": 20, "total": 1, "total_pages": 1 }
+  }
+}
+```
+
+General rows omit `target_id` / `target_name` and never carry `phone`/`program_of_interest`/etc.; university/college rows omit `preferred_university` / `resume_url`.
+
+### Get one counselling inquiry (admin)
+
+### GET `/api/v1/admin/counselling/{id}`
+
+**Auth:** admin
+
+**Response 200:** the same row shape as the list endpoint, returned alone under `data`.
+
+### Update a counselling inquiry (admin)
+
+### PATCH `/api/v1/admin/counselling/{id}`
+
+Transition status to `reviewed` or `archived`, optionally attach a private `review_note`.
+
+**Auth:** admin
+
+**Request body:**
+```json
+{ "status": "reviewed", "review_note": "Contacted via email on 2026-07-26" }
+```
+
+**Response 200:** the updated row (with `reviewer_id`, `reviewed_at`, and `updated_at` refreshed).
+
+### Representative counselling endpoints
+
+The same three operations exist under `/representative/counselling`. Representatives only see rows bound to their institution (their JWT carries `representative_university_id` or `representative_college_id`). General rows are invisible to representatives — `GET /representative/counselling?type=general` returns an empty page. Any out-of-scope read or write returns `403`.
+
+### GET `/api/v1/representative/counselling?status=pending&page=1`
+
+### GET `/api/v1/representative/counselling/{id}`
+
+### PATCH `/api/v1/representative/counselling/{id}`
+
+Same request/response shapes as the admin counterparts; same auth role gating (`admin` or `representative`), but with representative scope enforced server-side.
+
+### Frontend integration checklist
+
+- [ ] Home-page "Free Counselling" form: POST the body to `/counselling/general`. If the user attached a resume, upload first via `/uploads/resume` (≤ 5 MiB, PDF/DOC/DOCX) and submit the returned `secure_url` as `resume_url`.
+- [ ] University/college detail page "Request Free Counselling" form: POST the body to `/counselling/universities/{id}` or `/counselling/colleges/{id}`. `phone` and `start_term` are required.
+- [ ] After submit: render a success state and reset the form. Do not poll for status — the user is notified by email out-of-band.
+- [ ] Admin counselling dashboard: list via `/admin/counselling?type=university&status=pending` (separate calls per type for deterministic pagination). Filter by `status` to focus on the active queue.
+- [ ] Admin/rep update: PATCH `{status: "reviewed", review_note: "..."}` to mark handled. `status: "archived"` removes a row from the default `pending` feed without deleting it.
+- [ ] Representative dashboard: list via `/representative/counselling?status=pending` — the service scopes this automatically to the representative's institution.
+- [ ] Hide the resume field for institution-specific forms; the columns don't apply there. The backend ignores `resume_url` on specific rows.
+
+---
 ---
 
 ## Lookup reference data
@@ -1927,12 +2546,12 @@ curl http://localhost:3000/api/v1/universities/lookups
 - [ ] For cross-origin SPAs, configure your HTTP client to send `credentials: 'include'` on every request (same-origin requests get this for free)
 - [ ] On 401 from any protected endpoint: call `POST /api/v1/auth/refresh` (no body) and retry the original request; on second 401, clear the bootstrapped user state and redirect to login
 - [ ] On logout: `DELETE /api/v1/auth/logout` (no body) — the server clears the cookies; the SPA can also clear any cached user state
-- [ ] University list page: `GET /universities?page=N&page_size=20&<filters>`, render items + meta. See "Filters" in the List endpoint above — filter param names match the FilterSidebar's `searchParams` keys exactly.
-- [ ] University detail page: `GET /universities/{id}`, render all fields + lookup arrays
-- [ ] University detail page — affiliated colleges list: `GET /universities/{id}/colleges` (or `GET /colleges?university_id={id}` with filters)
-- [ ] College list page: `GET /colleges?page=N&page_size=20&<filters>` (`university_id`, `country`, `state_province`, `city`)
-- [ ] College search box: `GET /colleges/search?q=<term>` — debounced; one search box covers college name, college location, and parent university name/slug. Results embed the parent university, so a single render call is enough.
-- [ ] College detail page: `GET /colleges/{id}`, render all fields
+- [ ] University list page: `GET /universities?page=N&page_size=20&<filters>`, render items + meta. See "Filters" in the List endpoint above — filter param names match the FilterSidebar's `searchParams` keys exactly. Use each row's `has_representative` to hide the "claim this university" prompt when it is `true`.
+- [ ] University detail page: `GET /universities/{id}`, render all fields + lookup arrays. Hide the representative-claim banner when `has_representative` is `true` (anonymous viewers included).
+- [ ] University detail page — affiliated colleges list: `GET /universities/{id}/colleges` (or `GET /colleges?university_id={id}` with filters). Each college row carries `has_representative` for the same banner logic.
+- [ ] College list page: `GET /colleges?page=N&page_size=20&<filters>` (`university_id`, `country`, `state_province`, `city`). Use `has_representative` on each row to hide the claim banner.
+- [ ] College search box: `GET /colleges/search?q=<term>` — debounced; one search box covers college name, college location, and parent university name/slug. Results embed the parent university and `is_favorited`/`has_representative`, so a single render call is enough.
+- [ ] College detail page: `GET /colleges/{id}`, render all fields including the new profile metadata (`excerpt`, `contact_*`, `website`, `cover_image`, `gallery_images`, `institution_type`, `campus_setting`, `founded_year`, `campus_size`, `is_popular`, `is_featured`). Hide the claim banner when `has_representative` is `true`.
 - [ ] Admin "create university" form: 
   - Use cached lookups to populate multi-selects
   - On submit: `POST /universities` with the assembled payload
@@ -1941,9 +2560,21 @@ curl http://localhost:3000/api/v1/universities/lookups
 - [ ] Admin "create college" form: `POST /colleges` with `university_id` selected from the universities list
 - [ ] Admin promotion: not a frontend concern; backend operator runs the SQL
 - [ ] "Become a representative" claim form (public):
-  - First upload the verification PDF: `POST /uploads/document?purpose=document` (multipart, ≤ 20 MiB, PDF only) — public endpoint, no auth needed
-  - Then submit the claim: `POST /claims/universities/{id}` with `{full_name, work_email, document_url}` where `document_url` is `data.secure_url` from the upload response
-- [ ] Admin claims dashboard: `GET /admin/claims?status=pending&page=N` to list, `POST /admin/claims/{id}/approve` (returns the one-time plaintext password for the new rep) or `POST /admin/claims/{id}/reject`
+  - Determine whether the user is claiming a university or college and retain that target's ID
+  - Upload the verification PDF first: `POST /uploads/document?purpose=document` (multipart, ≤ 20 MiB, PDF only; no auth required)
+  - Submit `{full_name, work_email, document_url}` to `/claims/universities/{id}` or `/claims/colleges/{id}`
+  - Read the unified response as `{claim_id, type, target_id, status, created_at}`
+- [ ] Admin claims dashboard:
+  - Prefer `GET /admin/claims?type=university&status=pending&page=N` and a separate `type=college` view for deterministic pagination
+  - Render each row from `type`, `target_id`, and `target_name`; do not use the removed `university_id` / `university_name` keys
+  - Approve with `POST /admin/claims/{id}/approve`; capture and display the returned `plain_password` exactly once
+  - Reject with `POST /admin/claims/{id}/reject`
+- [ ] Representative editing UI:
+  - Bootstrap with `/auth/me` and branch on `representative_university_id` versus `representative_college_id`
+  - University rep: show edit controls only for `/universities/{representative_university_id}` and allow college creation beneath it. Disable the `name` and `slug` fields in the form (representatives get `403` if they try to PATCH them)
+  - College rep: show edit controls only for `/colleges/{representative_college_id}` and save through `PATCH /colleges/{id}`. Disable the `name` and `slug` fields in the form (representatives get `403` if they try to PATCH them)
+  - Treat backend `403` responses as authoritative even if the UI believed the user was in scope
+  - Public read payloads already expose `has_representative`, so use it to hide the claim banner — no need to query the admin claims feed to detect ownership
 
 ---
 

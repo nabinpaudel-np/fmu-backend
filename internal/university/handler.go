@@ -59,6 +59,42 @@ func (h *UniversityHandler) stampFavorited(ctx context.Context, items []Universi
 	}
 }
 
+func (h *UniversityHandler) stampRepresented(ctx context.Context, items []UniversityListItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+	ids := make([]string, len(items))
+	for i, item := range items {
+		ids[i] = item.ID
+	}
+	set, err := h.universityService.RepresentedIDs(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for i := range items {
+		_, items[i].HasRepresentative = set[items[i].ID]
+	}
+	return nil
+}
+
+func (h *UniversityHandler) stampSearchRepresented(ctx context.Context, items []UniversitySearchResult) error {
+	if len(items) == 0 {
+		return nil
+	}
+	ids := make([]string, len(items))
+	for i, item := range items {
+		ids[i] = item.ID
+	}
+	set, err := h.universityService.RepresentedIDs(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for i := range items {
+		_, items[i].HasRepresentative = set[items[i].ID]
+	}
+	return nil
+}
+
 // resourceField maps a lookup-table name to the request-DTO field that
 // references it, so error messages name the field the client sent.
 var resourceField = map[string]string{
@@ -136,6 +172,10 @@ func (h *UniversityHandler) Patch(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.universityService.Patch(r.Context(), id, &req)
 	if err != nil {
+		if errors.Is(err, errs.ErrRepCannotChangeNameOrSlug) {
+			response.Error(w, http.StatusForbidden, err.Error())
+			return
+		}
 		var refErr *errs.InvalidReferencesError
 		if errors.As(err, &refErr) {
 			details := make([]response.ErrorDetail, 0, len(refErr.References))
@@ -176,6 +216,13 @@ func (h *UniversityHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	set, err := h.universityService.RepresentedIDs(r.Context(), []string{detail.ID})
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+	_, detail.HasRepresentative = set[detail.ID]
+
 	response.Success(w, http.StatusOK, detail)
 }
 
@@ -192,6 +239,11 @@ func (h *UniversityHandler) Search(w http.ResponseWriter, r *http.Request) {
 
 	items, err := h.universityService.Search(r.Context(), q)
 	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+
+	if err := h.stampSearchRepresented(r.Context(), items); err != nil {
 		response.Error(w, http.StatusInternalServerError, "something went wrong")
 		return
 	}
@@ -232,6 +284,10 @@ func (h *UniversityHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.stampRepresented(r.Context(), items); err != nil {
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
 	h.stampFavorited(r.Context(), items)
 
 	response.Success(w, http.StatusOK, pagination.Response[UniversityListItem]{

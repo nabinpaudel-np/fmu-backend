@@ -34,6 +34,7 @@ type Config struct {
 
 	Cloudinary CloudinaryConfig `envPrefix:"CLOUDINARY_"`
 	Supabase   SupabaseConfig   `envPrefix:"SUPABASE_"`
+	Mail       MailConfig       `envPrefix:"MAIL_"`
 }
 
 type CloudinaryConfig struct {
@@ -48,6 +49,28 @@ type SupabaseConfig struct {
 	URL            string `env:"URL"`
 	ServiceRoleKey string `env:"SERVICE_ROLE_KEY"`
 	DocsBucket     string `env:"DOCS_BUCKET" envDefault:"documents"`
+}
+
+// MailConfig holds the SMTP settings. Username + Password are required;
+// everything else has sane defaults that work for Gmail.
+//
+//	SMTP_USERNAME   smtp user (usually the From address)
+//	SMTP_PASSWORD   smtp password (Gmail App Password for Gmail accounts)
+//	SMTP_FROM       From address; falls back to Username if empty
+//	SMTP_FROM_NAME  display name shown next to the From address
+//	SMTP_SERVER     smtp host (default smtp.gmail.com)
+//	SMTP_PORT       smtp port (default 587)
+//	SMTP_STARTTLS   enable STARTTLS (default true)
+//	SMTP_SSL_TLS    connect over implicit TLS / SMTPS (default false)
+type MailConfig struct {
+	Username  string `env:"USERNAME,required"`
+	Password  string `env:"PASSWORD,required"`
+	From      string `env:"FROM"`
+	FromName  string `env:"FROM_NAME" envDefault:""`
+	Server    string `env:"SERVER" envDefault:"smtp.gmail.com"`
+	Port      int    `env:"PORT" envDefault:"587"`
+	StartTLS  bool   `env:"STARTTLS" envDefault:"true"`
+	SSLTLS    bool   `env:"SSL_TLS" envDefault:"false"`
 }
 
 func Load() (*Config, error) {

@@ -30,6 +30,7 @@ type UniversityRepository interface {
 	Get(ctx context.Context, q pagination.Query, f Filters) ([]sqlc.University, int64, error)
 	GetByID(ctx context.Context, id string) (sqlc.University, error)
 	Search(ctx context.Context, q string) ([]sqlc.SearchUniversitiesRow, error)
+	RepresentedIDs(ctx context.Context, ids []string) (map[string]struct{}, error)
 	Stats(ctx context.Context) (*UniversityStats, error)
 	GetUniversityDegreeLevels(ctx context.Context, universityID string) ([]sqlc.DegreeLevel, error)
 	GetUniversityMajors(ctx context.Context, universityID string) ([]sqlc.Major, error)
@@ -70,6 +71,21 @@ func (r *universityRepository) Search(ctx context.Context, q string) ([]sqlc.Sea
 		Similarity: q,
 		Limit:      int32(maxSearchResults),
 	})
+}
+
+func (r *universityRepository) RepresentedIDs(ctx context.Context, ids []string) (map[string]struct{}, error) {
+	if len(ids) == 0 {
+		return map[string]struct{}{}, nil
+	}
+	rows, err := r.queries.ListRepresentedUniversityIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("list represented university ids: %w", err)
+	}
+	set := make(map[string]struct{}, len(rows))
+	for _, id := range rows {
+		set[id] = struct{}{}
+	}
+	return set, nil
 }
 
 func (r *universityRepository) Create(ctx context.Context, params sqlc.CreateUniversityParams, ids lookupIDs) (sqlc.University, error) {

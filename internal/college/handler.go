@@ -57,6 +57,42 @@ func (h *CollegeHandler) stampFavorited(ctx context.Context, items []CollegeList
 	}
 }
 
+func (h *CollegeHandler) stampRepresented(ctx context.Context, items []CollegeListItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+	ids := make([]string, len(items))
+	for i, item := range items {
+		ids[i] = item.ID
+	}
+	set, err := h.collegeService.RepresentedIDs(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for i := range items {
+		_, items[i].HasRepresentative = set[items[i].ID]
+	}
+	return nil
+}
+
+func (h *CollegeHandler) stampSearchRepresented(ctx context.Context, items []CollegeSearchResult) error {
+	if len(items) == 0 {
+		return nil
+	}
+	ids := make([]string, len(items))
+	for i, item := range items {
+		ids[i] = item.ID
+	}
+	set, err := h.collegeService.RepresentedIDs(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for i := range items {
+		_, items[i].HasRepresentative = set[items[i].ID]
+	}
+	return nil
+}
+
 func (h *CollegeHandler) Create(w http.ResponseWriter, r *http.Request) {
 	var req CreateCollegeRequest
 
@@ -97,6 +133,10 @@ func (h *CollegeHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.stampRepresented(r.Context(), items); err != nil {
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
 	h.stampFavorited(r.Context(), items)
 
 	response.Success(w, http.StatusOK, pagination.Response[CollegeListItem]{
@@ -117,6 +157,13 @@ func (h *CollegeHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusInternalServerError, "something went wrong")
 		return
 	}
+
+	set, err := h.collegeService.RepresentedIDs(r.Context(), []string{detail.ID})
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+	_, detail.HasRepresentative = set[detail.ID]
 
 	response.Success(w, http.StatusOK, detail)
 }
@@ -140,6 +187,8 @@ func (h *CollegeHandler) Update(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, errs.ErrNotFound):
 			response.Error(w, http.StatusNotFound, "college not found")
+		case errors.Is(err, errs.ErrRepCannotChangeNameOrSlug):
+			response.Error(w, http.StatusForbidden, err.Error())
 		case errors.Is(err, errs.ErrCollegeSlugTaken):
 			response.Error(w, http.StatusConflict, err.Error())
 		default:
@@ -164,6 +213,10 @@ func (h *CollegeHandler) ListByUniversity(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	if err := h.stampRepresented(r.Context(), items); err != nil {
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
 	h.stampFavorited(r.Context(), items)
 
 	response.Success(w, http.StatusOK, pagination.Response[CollegeListItem]{
@@ -185,6 +238,11 @@ func (h *CollegeHandler) Search(w http.ResponseWriter, r *http.Request) {
 
 	items, err := h.collegeService.Search(r.Context(), q)
 	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+
+	if err := h.stampSearchRepresented(r.Context(), items); err != nil {
 		response.Error(w, http.StatusInternalServerError, "something went wrong")
 		return
 	}

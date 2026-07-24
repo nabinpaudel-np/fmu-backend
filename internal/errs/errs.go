@@ -28,6 +28,7 @@ var (
 	ErrCollegeAlreadyHasRepresentative    = errors.New("college already has a representative")
 	ErrClaimRoleNotAllowed                = errors.New("only non-student, non-admin users may submit a claim")
 	ErrRepOutOfScope                      = errors.New("representative can only edit their own university")
+	ErrRepCannotChangeNameOrSlug          = errors.New("representatives cannot change name or slug")
 )
 
 // InvalidReferencesError is returned when one or more UUIDs in a request

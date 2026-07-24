@@ -22,4 +22,7 @@ func RegisterRoutes(
 	// their verification PDF without first having to register an account.
 	// The 20MB cap + Cloudinary quota are the abuse floor.
 	r.Post("/api/v1/uploads/document", h.UploadDocument)
+	// /resume is public so anonymous counselling submitters can attach a
+	// CV without registering. PDF/DOC/DOCX, 5 MB cap.
+	r.Post("/api/v1/uploads/resume", h.UploadResume)
 }

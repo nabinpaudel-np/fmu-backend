@@ -20,6 +20,7 @@ type CollegeService interface {
 	GetByID(ctx context.Context, id string) (*CollegeDetailResponse, error)
 	ListByUniversity(ctx context.Context, universityID string, q pagination.Query) ([]CollegeListItem, int64, error)
 	Search(ctx context.Context, q string) ([]CollegeSearchResult, error)
+	RepresentedIDs(ctx context.Context, ids []string) (map[string]struct{}, error)
 }
 
 type collegeService struct {
@@ -78,12 +79,12 @@ func (s *collegeService) GetByID(ctx context.Context, id string) (*CollegeDetail
 }
 
 func (s *collegeService) Update(ctx context.Context, id string, req *UpdateCollegeRequest) (*CreateCollegeResponse, error) {
-	// AuthMiddleware injects claims into ctx; admin-or-rep middleware already
-	// gated the route. For reps we additionally require their bound college
-	// id to match the URL — RequireCollegeEditor handles admin + rep-scope
-	// checks at the HTTP layer, so by the time we reach here, the only
-	// remaining check is "did the caller pass an id they own?" — already
-	// validated upstream. No additional in-body guard needed.
+	if claims, err := auth.ClaimsFromContext(ctx); err == nil && claims.Role == auth.RoleRepresentative {
+		if req.Name != nil || req.Slug != nil {
+			return nil, errs.ErrRepCannotChangeNameOrSlug
+		}
+	}
+
 	row, err := s.repo.Update(ctx, id, req)
 	if err != nil {
 		if errors.Is(err, errs.ErrNotFound) {
@@ -126,4 +127,13 @@ func (s *collegeService) Search(ctx context.Context, q string) ([]CollegeSearchR
 		items[i] = toCollegeSearchResult(row)
 	}
 	return items, nil
+}
+
+func (s *collegeService) RepresentedIDs(ctx context.Context, ids []string) (map[string]struct{}, error) {
+	set, err := s.repo.RepresentedIDs(ctx, ids)
+	if err != nil {
+		log.Default().Printf("failed to list represented college ids: %v", err)
+		return nil, err
+	}
+	return set, nil
 }

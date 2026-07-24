@@ -66,7 +66,11 @@ SELECT
     COALESCE(u.tuition_max, 0)             AS tuition_max,
     COALESCE(u.acceptance_rate, 0)::float8 AS acceptance_rate,
     u.is_popular,
-    u.is_featured
+    u.is_featured,
+    EXISTS (
+        SELECT 1 FROM users rep
+        WHERE rep.representative_university_id = u.id
+    ) AS has_representative
 FROM university_favorites uf
 JOIN universities u ON u.id = uf.university_id
 WHERE uf.user_id = $1
@@ -94,7 +98,7 @@ func (r *repository) ListUniversities(ctx context.Context, userID string, q pagi
 			&u.Country, &u.State, &u.City, &u.Logo,
 			&u.CoverImage, &u.InstitutionType, &u.CampusSetting,
 			&u.TuitionMin, &u.TuitionMax, &u.AcceptanceRate,
-			&u.IsPopular, &u.IsFeatured,
+			&u.IsPopular, &u.IsFeatured, &u.HasRepresentative,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scan favorited university: %w", err)
 		}
@@ -114,7 +118,7 @@ func (r *repository) FavoritedUniversityIDs(ctx context.Context, userID string, 
 		return map[string]struct{}{}, nil
 	}
 	rows, err := r.queries.ListFavoritedUniversityIDs(ctx, sqlc.ListFavoritedUniversityIDsParams{
-		UserID: userID,
+		UserID:  userID,
 		Column2: ids,
 	})
 	if err != nil {
@@ -149,8 +153,17 @@ SELECT
     c.university_id,
     COALESCE(c.country, '') AS country,
     COALESCE(c.state, '')   AS state,
-    COALESCE(c.city, '')    AS city,
-    COALESCE(c.logo, '')    AS logo
+    COALESCE(c.city, '')             AS city,
+    COALESCE(c.logo, '')             AS logo,
+    COALESCE(c.cover_image, '')      AS cover_image,
+    COALESCE(c.institution_type, '') AS institution_type,
+    COALESCE(c.campus_setting, '')   AS campus_setting,
+    c.is_popular,
+    c.is_featured,
+    EXISTS (
+        SELECT 1 FROM users rep
+        WHERE rep.representative_college_id = c.id
+    ) AS has_representative
 FROM college_favorites cf
 JOIN colleges c ON c.id = cf.college_id
 WHERE cf.user_id = $1
@@ -176,6 +189,8 @@ func (r *repository) ListColleges(ctx context.Context, userID string, q paginati
 		if err := rows.Scan(
 			&c.ID, &c.Name, &c.Slug, &c.UniversityID,
 			&c.Country, &c.State, &c.City, &c.Logo,
+			&c.CoverImage, &c.InstitutionType, &c.CampusSetting,
+			&c.IsPopular, &c.IsFeatured, &c.HasRepresentative,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scan favorited college: %w", err)
 		}
@@ -194,7 +209,7 @@ func (r *repository) FavoritedCollegeIDs(ctx context.Context, userID string, ids
 		return map[string]struct{}{}, nil
 	}
 	rows, err := r.queries.ListFavoritedCollegeIDs(ctx, sqlc.ListFavoritedCollegeIDsParams{
-		UserID:   userID,
+		UserID:  userID,
 		Column2: ids,
 	})
 	if err != nil {

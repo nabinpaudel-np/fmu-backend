@@ -1,12 +1,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/joho/godotenv"
 
@@ -15,9 +17,11 @@ import (
 	"fmu-backend/internal/cloudinary"
 	"fmu-backend/internal/college"
 	"fmu-backend/internal/config"
+	"fmu-backend/internal/counselling"
 	"fmu-backend/internal/db"
 	"fmu-backend/internal/db/sqlc"
 	"fmu-backend/internal/favorites"
+	"fmu-backend/internal/mail"
 	"fmu-backend/internal/oauth"
 	"fmu-backend/internal/supabase"
 	"fmu-backend/internal/token"
@@ -83,14 +87,38 @@ func main() {
 
 	uniClaimRepo := claim.NewUniversityClaimRepository(queries)
 	colClaimRepo := claim.NewCollegeClaimRepository(queries)
+
+	// Mailer — falls back to a nil client when SMTP credentials are
+	// missing so the app still starts in environments without email set
+	// up. The login URL is what gets baked into approval emails.
+	mailer, err := mail.New(cfg.Mail)
+	if err != nil {
+		if errors.Is(err, mail.ErrNotConfigured) {
+			log.Printf("mail: SMTP not configured, claim approval emails disabled")
+		} else {
+			log.Fatalf("mail init failed: %v", err)
+		}
+	}
+	loginURL := strings.TrimRight(cfg.FrontendURL, "/") + "/login"
+
 	claimSvc := claim.NewClaimService(
 		uniClaimRepo,
 		colClaimRepo,
 		claim.NewUniversityExisterAdapter(universitySvc),
 		claim.NewCollegeExisterAdapter(collegeSvc),
 		userSvc,
+		mailer,
+		loginURL,
 	)
 	claimHandler := claim.NewClaimHandler(claimSvc)
+
+	counsellingRepo := counselling.NewCounsellingRepository(queries)
+	counsellingSvc := counselling.NewCounsellingService(
+		counsellingRepo,
+		counselling.NewUniversityExisterAdapter(universitySvc),
+		counselling.NewCollegeExisterAdapter(collegeSvc),
+	)
+	counsellingHandler := counselling.NewCounsellingHandler(counsellingSvc)
 
 	cld, err := cloudinary.New(cloudinary.Config{
 		CloudName:      cfg.Cloudinary.CloudName,
@@ -116,6 +144,10 @@ func main() {
 	uploadsHandler := uploads.NewHandler(uploadsSvc)
 
 	r := chi.NewRouter()
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(middleware.Recoverer)
+	r.Use(middleware.Logger)
 
 	origins := splitAndTrim(cfg.AllowedOrigins, ",")
 	for _, o := range origins {
@@ -140,6 +172,7 @@ func main() {
 	college.RegisterRoutes(r, collegeHandler, authMW, adminOrRepMW, optionalAuthMW)
 	favorites.RegisterRoutes(r, favoritesHandler, authMW, studentMW)
 	claim.RegisterRoutes(r, claimHandler, authMW, adminMW, optionalAuthMW)
+	counselling.RegisterRoutes(r, counsellingHandler, authMW, adminMW, adminOrRepMW)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,

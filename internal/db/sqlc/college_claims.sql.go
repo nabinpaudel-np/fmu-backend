@@ -56,18 +56,6 @@ func (q *Queries) ApproveCollegeClaim(ctx context.Context, arg ApproveCollegeCla
 	return i, err
 }
 
-const countActiveRepresentativeForCollege = `-- name: CountActiveRepresentativeForCollege :one
-SELECT COUNT(*) FROM users
-WHERE representative_college_id = $1
-`
-
-func (q *Queries) CountActiveRepresentativeForCollege(ctx context.Context, representativeCollegeID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countActiveRepresentativeForCollege, representativeCollegeID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countCollegeClaims = `-- name: CountCollegeClaims :one
 SELECT COUNT(*) FROM college_claims
 WHERE ($1::text IS NULL OR status = $1)

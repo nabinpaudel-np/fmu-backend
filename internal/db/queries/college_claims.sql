@@ -35,10 +35,6 @@ LIMIT $2 OFFSET $3;
 SELECT COUNT(*) FROM college_claims
 WHERE college_id = $1 AND status = 'pending';
 
--- name: CountActiveRepresentativeForCollege :one
-SELECT COUNT(*) FROM users
-WHERE representative_college_id = $1;
-
 -- name: ApproveCollegeClaim :one
 UPDATE college_claims
 SET status = 'approved',

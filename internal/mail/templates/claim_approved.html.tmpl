@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Your claim has been approved</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f4f6fb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:#1f2937;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f6fb;padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(15,23,42,0.06);">
+          <tr>
+            <td style="background-color:#1d4ed8;padding:24px 32px;">
+              <h1 style="margin:0;font-size:20px;color:#ffffff;font-weight:600;">{{ .FromName }}</h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:32px;">
+              <p style="margin:0 0 16px 0;font-size:16px;line-height:24px;">Hi {{ .FullName }},</p>
+
+              <p style="margin:0 0 16px 0;font-size:16px;line-height:24px;">
+                Your claim for <strong>{{ .InstitutionName }}</strong> has been approved.
+                You are now the official <strong>{{ .Role }}</strong> for this {{ .InstitutionType }} on {{ .FromName }}.
+              </p>
+
+              <p style="margin:0 0 8px 0;font-size:16px;line-height:24px;">
+                Use the credentials below to log in for the first time:
+              </p>
+
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;margin:16px 0 24px 0;">
+                <tr>
+                  <td style="padding:16px 20px;">
+                    <p style="margin:0 0 8px 0;font-size:14px;color:#6b7280;">Email</p>
+                    <p style="margin:0 0 16px 0;font-size:15px;color:#111827;font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;">{{ .Email }}</p>
+
+                    <p style="margin:0 0 8px 0;font-size:14px;color:#6b7280;">Temporary password</p>
+                    <p style="margin:0;font-size:15px;color:#111827;font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;">{{ .Password }}</p>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:0 0 24px 0;font-size:14px;line-height:22px;color:#6b7280;">
+                For your security, please change your password after signing in.
+              </p>
+
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px 0;">
+                <tr>
+                  <td align="center" bgcolor="#1d4ed8" style="border-radius:8px;">
+                    <a href="{{ .LoginURL }}" target="_blank" style="display:inline-block;padding:12px 24px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;">Log in to your dashboard</a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:0;font-size:14px;line-height:22px;color:#6b7280;">
+                If the button doesn't work, copy and paste this URL into your browser:<br />
+                <a href="{{ .LoginURL }}" style="color:#1d4ed8;word-break:break-all;">{{ .LoginURL }}</a>
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color:#f9fafb;padding:20px 32px;border-top:1px solid #e5e7eb;">
+              <p style="margin:0;font-size:12px;line-height:18px;color:#9ca3af;">
+                This email was sent by {{ .FromName }}. If you didn't request this account, please ignore this message.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
