@@ -183,3 +183,9 @@ ORDER BY GREATEST(
     similarity(city, $1)
 ) DESC, name ASC
 LIMIT $2;
+
+-- name: ListRepresentedUniversityIDs :many
+SELECT u.id
+FROM universities u
+JOIN users usr ON usr.representative_university_id = u.id
+WHERE u.id = ANY($1::uuid[]);

@@ -24,3 +24,8 @@ RETURNING *;
 INSERT INTO users (full_name, email, password, role, representative_university_id, email_verified)
 VALUES ($1, $2, $3, 'representative', $4, true)
 RETURNING *;
+
+-- name: CreateCollegeRepresentativeUser :one
+INSERT INTO users (full_name, email, password, role, representative_college_id, email_verified)
+VALUES ($1, $2, $3, 'representative', $4, true)
+RETURNING *;

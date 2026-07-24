@@ -14,6 +14,7 @@ import (
 const (
 	MaxImageBytes   int64 = 10 << 20 // 10 MiB
 	MaxDocumentBytes int64 = 20 << 20 // 20 MiB
+	MaxResumeBytes   int64 = 5 << 20  // 5 MiB
 
 	documentMimePDF = "application/pdf"
 )
@@ -22,6 +23,7 @@ type UploadsService interface {
 	Sign(ctx context.Context, req SignUploadRequest) (SignUploadResponse, error)
 	UploadImage(ctx context.Context, purpose string, file io.Reader) (UploadImageResponse, error)
 	UploadDocument(ctx context.Context, purpose string, file io.Reader, mime string) (UploadDocumentResponse, error)
+	UploadResume(ctx context.Context, ext string, file io.Reader, mime string) (UploadDocumentResponse, error)
 }
 
 type uploadsService struct {
@@ -106,6 +108,30 @@ func (s *uploadsService) UploadDocument(ctx context.Context, purpose string, fil
 	}
 
 	name, err := randomObjectName("pdf")
+	if err != nil {
+		return UploadDocumentResponse{}, fmt.Errorf("uploads: %w", err)
+	}
+
+	res, err := s.supa.Upload(ctx, s.docsBucket, name, mime, file)
+	if err != nil {
+		return UploadDocumentResponse{}, err
+	}
+	return UploadDocumentResponse{
+		SecureURL: res.PublicURL,
+		Path:      res.Path,
+		Bytes:     res.Bytes,
+	}, nil
+}
+
+// UploadResume stores a CV/resume in the same Supabase documents bucket but
+// accepts PDF/DOC/DOCX with a tighter 5 MB cap. The frontend uploads here,
+// captures secure_url, and submits that URL on the counselling form.
+func (s *uploadsService) UploadResume(ctx context.Context, ext string, file io.Reader, mime string) (UploadDocumentResponse, error) {
+	if s.supa == nil {
+		return UploadDocumentResponse{}, supabase.ErrNotConfigured
+	}
+
+	name, err := randomObjectName(ext)
 	if err != nil {
 		return UploadDocumentResponse{}, fmt.Errorf("uploads: %w", err)
 	}

@@ -2,37 +2,60 @@ package claim
 
 import "time"
 
-// SubmitClaimRequest is the public-facing payload for POST /claims/universities/{id}.
+// ClaimTarget discriminates which entity a claim is attached to. The URL
+// prefix and the table backing the claim both derive from this value.
+type ClaimTarget string
+
+const (
+	TargetUniversity ClaimTarget = "university"
+	TargetCollege    ClaimTarget = "college"
+)
+
+// IsValid reports whether t is a known claim target. Used by the handler to
+// reject bad ?type= filter values on the admin list endpoint.
+func (t ClaimTarget) IsValid() bool {
+	switch t {
+	case TargetUniversity, TargetCollege:
+		return true
+	}
+	return false
+}
+
+// SubmitClaimRequest is the public-facing payload for POST /claims/{target}/{id}.
 type SubmitClaimRequest struct {
 	FullName    string `json:"full_name"    validate:"required,min=2,max=255"`
 	WorkEmail   string `json:"work_email"   validate:"required,email,max=255"`
 	DocumentURL string `json:"document_url" validate:"required,url,max=500"`
 }
 
-// SubmitClaimResponse is what the public submit endpoint returns. We expose only
-// the claim id + status; the admin reviews the rest in the dashboard.
+// SubmitClaimResponse is what the public submit endpoint returns. We expose
+// only the claim id + status; the admin reviews the rest in the dashboard.
 type SubmitClaimResponse struct {
-	ClaimID      string    `json:"claim_id"`
-	UniversityID string    `json:"university_id"`
-	Status       string    `json:"status"`
-	CreatedAt    time.Time `json:"created_at"`
+	ClaimID   string      `json:"claim_id"`
+	Type      ClaimTarget `json:"type"`
+	TargetID  string      `json:"target_id"`
+	Status    string      `json:"status"`
+	CreatedAt time.Time   `json:"created_at"`
 }
 
-// ClaimListItem is the row shape used by GET /admin/claims.
+// ClaimListItem is the row shape used by GET /admin/claims. Type +
+// TargetID/TargetName identify the entity the claim is for; the rest of the
+// fields are claim metadata.
 type ClaimListItem struct {
-	ID             string     `json:"id"`
-	UniversityID   string     `json:"university_id"`
-	UniversityName string     `json:"university_name"`
-	FullName       string     `json:"full_name"`
-	WorkEmail      string     `json:"work_email"`
-	DocumentURL    string     `json:"document_url"`
-	Status         string     `json:"status"`
-	ReviewerID     *string    `json:"reviewer_id,omitempty"`
-	ReviewedAt     *time.Time `json:"reviewed_at,omitempty"`
-	ReviewNote     *string    `json:"review_note,omitempty"`
-	CreatedUserID  *string    `json:"created_user_id,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID            string      `json:"id"`
+	Type          ClaimTarget `json:"type"`
+	TargetID      string      `json:"target_id"`
+	TargetName    string      `json:"target_name"`
+	FullName      string      `json:"full_name"`
+	WorkEmail     string      `json:"work_email"`
+	DocumentURL   string      `json:"document_url"`
+	Status        string      `json:"status"`
+	ReviewerID    *string     `json:"reviewer_id,omitempty"`
+	ReviewedAt    *time.Time  `json:"reviewed_at,omitempty"`
+	ReviewNote    *string     `json:"review_note,omitempty"`
+	CreatedUserID *string     `json:"created_user_id,omitempty"`
+	CreatedAt     time.Time   `json:"created_at"`
+	UpdatedAt     time.Time   `json:"updated_at"`
 }
 
 // ClaimDetailResponse mirrors ClaimListItem; admin endpoints always return the

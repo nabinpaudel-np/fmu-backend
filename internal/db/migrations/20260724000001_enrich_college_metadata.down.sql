@@ -1,0 +1,14 @@
+ALTER TABLE colleges
+    DROP COLUMN is_featured,
+    DROP COLUMN is_popular,
+    DROP COLUMN campus_size,
+    DROP COLUMN founded_year,
+    DROP COLUMN campus_setting,
+    DROP COLUMN institution_type,
+    DROP COLUMN gallery_images,
+    DROP COLUMN cover_image,
+    DROP COLUMN zipcode,
+    DROP COLUMN website,
+    DROP COLUMN contact_phone,
+    DROP COLUMN contact_email,
+    DROP COLUMN excerpt;

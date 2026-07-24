@@ -25,6 +25,14 @@ var allowedDocumentMimes = map[string]struct{}{
 	"application/pdf": {},
 }
 
+func isImagePurpose(p string) bool {
+	switch p {
+	case "logo", "cover", "gallery":
+		return true
+	}
+	return false
+}
+
 const fileFieldName = "file"
 
 type UploadsHandler struct {
@@ -177,10 +185,79 @@ func (h *UploadsHandler) UploadDocument(w http.ResponseWriter, r *http.Request) 
 	response.Success(w, http.StatusCreated, out)
 }
 
-func isImagePurpose(p string) bool {
-	switch p {
-	case "logo", "cover", "gallery":
-		return true
+// UploadResume handles POST /api/v1/uploads/resume. Public — anonymous
+// counselling submitters can upload a CV without first registering an account.
+// Accepts PDF, DOC, and DOCX (5 MB cap). http.DetectContentType misclassifies
+// DOC and DOCX, so we sniff by filename extension. The filename's extension
+// is what we trust for storage; MIME is derived from that extension.
+func (h *UploadsHandler) UploadResume(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, MaxResumeBytes)
+
+	if err := r.ParseMultipartForm(MaxResumeBytes); err != nil {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			response.Error(w, http.StatusRequestEntityTooLarge,
+				fmt.Sprintf("file exceeds %d bytes", MaxResumeBytes))
+			return
+		}
+		response.Error(w, http.StatusBadRequest, "invalid multipart form")
+		return
 	}
-	return false
+
+	file, header, err := r.FormFile(fileFieldName)
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "file is required (multipart field 'file')")
+		return
+	}
+	defer file.Close()
+
+	if header.Size <= 0 {
+		response.Error(w, http.StatusBadRequest, "file is empty")
+		return
+	}
+
+	ext, mime, ok := sniffResume(header.Filename)
+	if !ok {
+		response.Error(w, http.StatusUnsupportedMediaType,
+			"only PDF, DOC, and DOCX files are accepted")
+		return
+	}
+
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+
+	out, err := h.svc.UploadResume(r.Context(), ext, file, mime)
+	if err != nil {
+		if errors.Is(err, supabase.ErrUploadFailed) || errors.Is(err, supabase.ErrNotConfigured) {
+			response.Error(w, http.StatusBadGateway, "upload to storage failed")
+			return
+		}
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+	response.Success(w, http.StatusCreated, out)
+}
+
+// sniffResume picks the file extension + MIME type from the filename.
+// Returns ("", "", false) for anything else.
+//
+//	Magic bytes (informational only — we don't sniff the body):
+//	  PDF  — `%PDF-`
+//	  DOCX — `PK\x03\x04` (ZIP/OOXML container)
+//	  DOC  — `\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1` (OLE Compound File)
+//
+// We trust the extension because the frontend always provides the original
+// filename via the multipart "file" header.
+func sniffResume(filename string) (ext, mime string, ok bool) {
+	lower := strings.ToLower(filename)
+	switch {
+	case strings.HasSuffix(lower, ".pdf"):
+		return "pdf", "application/pdf", true
+	case strings.HasSuffix(lower, ".docx"):
+		return "docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", true
+	case strings.HasSuffix(lower, ".doc"):
+		return "doc", "application/msword", true
+	}
+	return "", "", false
 }

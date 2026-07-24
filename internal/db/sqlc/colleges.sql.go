@@ -21,19 +21,54 @@ func (q *Queries) CountCollegesByUniversity(ctx context.Context, universityID st
 }
 
 const createCollege = `-- name: CreateCollege :one
-INSERT INTO colleges (name, slug, university_id, overview, country, state, city, full_location, logo) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, name, slug, university_id, overview, country, state, city, full_location, logo, created_at, updated_at
+INSERT INTO colleges (
+    name, slug, university_id, overview, excerpt,
+    country, state, city, full_location,
+    cover_image, logo, institution_type, campus_setting,
+    contact_email, contact_phone, website, zipcode,
+    founded_year, campus_size, gallery_images,
+    is_popular, is_featured
+)
+VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8, $9,
+    $10, $11, $12, $13,
+    $14, $15, $16, $17,
+    $18, $19, $20,
+    $21, $22
+)
+RETURNING
+    id, name, slug, university_id, overview, excerpt,
+    country, state, city, full_location,
+    cover_image, logo, institution_type, campus_setting,
+    contact_email, contact_phone, website, zipcode,
+    founded_year, campus_size, gallery_images,
+    is_popular, is_featured, created_at, updated_at
 `
 
 type CreateCollegeParams struct {
-	Name         string
-	Slug         string
-	UniversityID string
-	Overview     string
-	Country      *string
-	State        *string
-	City         *string
-	FullLocation *string
-	Logo         *string
+	Name            string
+	Slug            string
+	UniversityID    string
+	Overview        string
+	Excerpt         *string
+	Country         *string
+	State           *string
+	City            *string
+	FullLocation    *string
+	CoverImage      *string
+	Logo            *string
+	InstitutionType *string
+	CampusSetting   *string
+	ContactEmail    *string
+	ContactPhone    *string
+	Website         *string
+	Zipcode         *string
+	FoundedYear     *int16
+	CampusSize      *string
+	GalleryImages   []string
+	IsPopular       bool
+	IsFeatured      bool
 }
 
 func (q *Queries) CreateCollege(ctx context.Context, arg CreateCollegeParams) (College, error) {
@@ -42,11 +77,24 @@ func (q *Queries) CreateCollege(ctx context.Context, arg CreateCollegeParams) (C
 		arg.Slug,
 		arg.UniversityID,
 		arg.Overview,
+		arg.Excerpt,
 		arg.Country,
 		arg.State,
 		arg.City,
 		arg.FullLocation,
+		arg.CoverImage,
 		arg.Logo,
+		arg.InstitutionType,
+		arg.CampusSetting,
+		arg.ContactEmail,
+		arg.ContactPhone,
+		arg.Website,
+		arg.Zipcode,
+		arg.FoundedYear,
+		arg.CampusSize,
+		arg.GalleryImages,
+		arg.IsPopular,
+		arg.IsFeatured,
 	)
 	var i College
 	err := row.Scan(
@@ -55,11 +103,24 @@ func (q *Queries) CreateCollege(ctx context.Context, arg CreateCollegeParams) (C
 		&i.Slug,
 		&i.UniversityID,
 		&i.Overview,
+		&i.Excerpt,
 		&i.Country,
 		&i.State,
 		&i.City,
 		&i.FullLocation,
+		&i.CoverImage,
 		&i.Logo,
+		&i.InstitutionType,
+		&i.CampusSetting,
+		&i.ContactEmail,
+		&i.ContactPhone,
+		&i.Website,
+		&i.Zipcode,
+		&i.FoundedYear,
+		&i.CampusSize,
+		&i.GalleryImages,
+		&i.IsPopular,
+		&i.IsFeatured,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -67,7 +128,15 @@ func (q *Queries) CreateCollege(ctx context.Context, arg CreateCollegeParams) (C
 }
 
 const getCollegeByID = `-- name: GetCollegeByID :one
-SELECT id, name, slug, university_id, overview, country, state, city, full_location, logo, created_at, updated_at FROM colleges WHERE id = $1
+SELECT
+    id, name, slug, university_id, overview, excerpt,
+    country, state, city, full_location,
+    cover_image, logo, institution_type, campus_setting,
+    contact_email, contact_phone, website, zipcode,
+    founded_year, campus_size, gallery_images,
+    is_popular, is_featured, created_at, updated_at
+FROM colleges
+WHERE id = $1
 `
 
 func (q *Queries) GetCollegeByID(ctx context.Context, id string) (College, error) {
@@ -79,11 +148,24 @@ func (q *Queries) GetCollegeByID(ctx context.Context, id string) (College, error
 		&i.Slug,
 		&i.UniversityID,
 		&i.Overview,
+		&i.Excerpt,
 		&i.Country,
 		&i.State,
 		&i.City,
 		&i.FullLocation,
+		&i.CoverImage,
 		&i.Logo,
+		&i.InstitutionType,
+		&i.CampusSetting,
+		&i.ContactEmail,
+		&i.ContactPhone,
+		&i.Website,
+		&i.Zipcode,
+		&i.FoundedYear,
+		&i.CampusSize,
+		&i.GalleryImages,
+		&i.IsPopular,
+		&i.IsFeatured,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -91,7 +173,17 @@ func (q *Queries) GetCollegeByID(ctx context.Context, id string) (College, error
 }
 
 const listCollegesByUniversity = `-- name: ListCollegesByUniversity :many
-SELECT id, name, slug, university_id, overview, country, state, city, full_location, logo, created_at, updated_at FROM colleges WHERE university_id = $1 ORDER BY name LIMIT $2 OFFSET $3
+SELECT
+    id, name, slug, university_id, overview, excerpt,
+    country, state, city, full_location,
+    cover_image, logo, institution_type, campus_setting,
+    contact_email, contact_phone, website, zipcode,
+    founded_year, campus_size, gallery_images,
+    is_popular, is_featured, created_at, updated_at
+FROM colleges
+WHERE university_id = $1
+ORDER BY name
+LIMIT $2 OFFSET $3
 `
 
 type ListCollegesByUniversityParams struct {
@@ -115,17 +207,57 @@ func (q *Queries) ListCollegesByUniversity(ctx context.Context, arg ListColleges
 			&i.Slug,
 			&i.UniversityID,
 			&i.Overview,
+			&i.Excerpt,
 			&i.Country,
 			&i.State,
 			&i.City,
 			&i.FullLocation,
+			&i.CoverImage,
 			&i.Logo,
+			&i.InstitutionType,
+			&i.CampusSetting,
+			&i.ContactEmail,
+			&i.ContactPhone,
+			&i.Website,
+			&i.Zipcode,
+			&i.FoundedYear,
+			&i.CampusSize,
+			&i.GalleryImages,
+			&i.IsPopular,
+			&i.IsFeatured,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRepresentedCollegeIDs = `-- name: ListRepresentedCollegeIDs :many
+SELECT c.id
+FROM colleges c
+JOIN users u ON u.representative_college_id = c.id
+WHERE c.id = ANY($1::uuid[])
+`
+
+func (q *Queries) ListRepresentedCollegeIDs(ctx context.Context, dollar_1 []string) ([]string, error) {
+	rows, err := q.db.Query(ctx, listRepresentedCollegeIDs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

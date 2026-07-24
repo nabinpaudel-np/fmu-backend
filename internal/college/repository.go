@@ -17,10 +17,12 @@ import (
 
 type CollegeRepository interface {
 	Create(ctx context.Context, params sqlc.CreateCollegeParams) (sqlc.College, error)
+	Update(ctx context.Context, id string, req *UpdateCollegeRequest) (sqlc.College, error)
 	List(ctx context.Context, q pagination.Query, f Filters) ([]sqlc.College, int64, error)
 	GetByID(ctx context.Context, id string) (sqlc.College, error)
 	ListByUniversity(ctx context.Context, universityID string, q pagination.Query) ([]sqlc.College, int64, error)
 	Search(ctx context.Context, q string) ([]sqlc.SearchCollegesRow, error)
+	RepresentedIDs(ctx context.Context, ids []string) (map[string]struct{}, error)
 }
 
 type collegeRepository struct {
@@ -28,12 +30,11 @@ type collegeRepository struct {
 	pool    *pgxpool.Pool
 }
 
-// maxCollegeSearchResults caps the /colleges/search dropdown.
 const maxCollegeSearchResults = 50
 
-// columns are spelled out (not SELECT *) because the runtime column order
-// can drift from schema.sql's declaration order after ALTER TABLE ADD COLUMN.
-const collegeColumnList = "id, name, slug, university_id, overview, country, state, city, full_location, logo, created_at, updated_at"
+// Keep this list explicit because ALTER TABLE ADD COLUMN can make runtime order
+// differ from schema.sql's declaration order.
+const collegeColumnList = "id, name, slug, university_id, overview, excerpt, country, state, city, full_location, cover_image, logo, institution_type, campus_setting, contact_email, contact_phone, website, zipcode, founded_year, campus_size, gallery_images, is_popular, is_featured, created_at, updated_at"
 
 func NewCollegeRepository(queries *sqlc.Queries, pool *pgxpool.Pool) CollegeRepository {
 	return &collegeRepository{
@@ -90,9 +91,12 @@ func collectColleges(rows pgx.Rows) ([]sqlc.College, error) {
 	for rows.Next() {
 		var c sqlc.College
 		if err := rows.Scan(
-			&c.ID, &c.Name, &c.Slug, &c.UniversityID, &c.Overview,
-			&c.Country, &c.State, &c.City, &c.FullLocation, &c.Logo,
-			&c.CreatedAt, &c.UpdatedAt,
+			&c.ID, &c.Name, &c.Slug, &c.UniversityID, &c.Overview, &c.Excerpt,
+			&c.Country, &c.State, &c.City, &c.FullLocation,
+			&c.CoverImage, &c.Logo, &c.InstitutionType, &c.CampusSetting,
+			&c.ContactEmail, &c.ContactPhone, &c.Website, &c.Zipcode,
+			&c.FoundedYear, &c.CampusSize, &c.GalleryImages,
+			&c.IsPopular, &c.IsFeatured, &c.CreatedAt, &c.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -101,9 +105,6 @@ func collectColleges(rows pgx.Rows) ([]sqlc.College, error) {
 	return items, rows.Err()
 }
 
-// buildCollegesWhere returns a parameterized WHERE fragment and matching args.
-// Empty Filters returns empty output. country/state/city are equality filters;
-// university_id is a UUID equality. No lookup-table joins.
 func buildCollegesWhere(f Filters) (string, []any) {
 	var clauses []string
 	var args []any
@@ -131,6 +132,116 @@ func (r *collegeRepository) GetByID(ctx context.Context, id string) (sqlc.Colleg
 	return r.queries.GetCollegeByID(ctx, id)
 }
 
+func (r *collegeRepository) Update(ctx context.Context, id string, req *UpdateCollegeRequest) (sqlc.College, error) {
+	sets := []string{}
+	args := []any{}
+
+	addSet := func(col string, val any) {
+		args = append(args, val)
+		sets = append(sets, fmt.Sprintf("%s = $%d", col, len(args)))
+	}
+
+	if req.Name != nil {
+		addSet("name", *req.Name)
+	}
+	if req.Slug != nil {
+		addSet("slug", *req.Slug)
+	}
+	if req.Overview != nil {
+		addSet("overview", *req.Overview)
+	}
+	if req.Excerpt != nil {
+		addSet("excerpt", *req.Excerpt)
+	}
+	if req.Country != nil {
+		addSet("country", *req.Country)
+	}
+	if req.State != nil {
+		addSet("state", *req.State)
+	}
+	if req.City != nil {
+		addSet("city", *req.City)
+	}
+	if req.FullLocation != nil {
+		addSet("full_location", *req.FullLocation)
+	}
+	if req.CoverImage != nil {
+		addSet("cover_image", *req.CoverImage)
+	}
+	if req.Logo != nil {
+		addSet("logo", *req.Logo)
+	}
+	if req.InstitutionType != nil {
+		addSet("institution_type", *req.InstitutionType)
+	}
+	if req.CampusSetting != nil {
+		addSet("campus_setting", *req.CampusSetting)
+	}
+	if req.ContactEmail != nil {
+		addSet("contact_email", *req.ContactEmail)
+	}
+	if req.ContactPhone != nil {
+		addSet("contact_phone", *req.ContactPhone)
+	}
+	if req.Website != nil {
+		addSet("website", *req.Website)
+	}
+	if req.Zipcode != nil {
+		addSet("zipcode", *req.Zipcode)
+	}
+	if req.FoundedYear != nil {
+		addSet("founded_year", int16(*req.FoundedYear))
+	}
+	if req.CampusSize != nil {
+		addSet("campus_size", *req.CampusSize)
+	}
+	if req.GalleryImages != nil {
+		addSet("gallery_images", *req.GalleryImages)
+	}
+	if req.IsPopular != nil {
+		addSet("is_popular", *req.IsPopular)
+	}
+	if req.IsFeatured != nil {
+		addSet("is_featured", *req.IsFeatured)
+	}
+
+	if len(sets) == 0 {
+		return r.queries.GetCollegeByID(ctx, id)
+	}
+
+	sets = append(sets, "updated_at = now()")
+	args = append(args, id)
+	sql := fmt.Sprintf(
+		`UPDATE colleges SET %s WHERE id = $%d
+		 RETURNING %s`,
+		strings.Join(sets, ", "), len(args), collegeColumnList,
+	)
+
+	var row sqlc.College
+	err := r.pool.QueryRow(ctx, sql, args...).Scan(
+		&row.ID, &row.Name, &row.Slug, &row.UniversityID, &row.Overview, &row.Excerpt,
+		&row.Country, &row.State, &row.City, &row.FullLocation,
+		&row.CoverImage, &row.Logo, &row.InstitutionType, &row.CampusSetting,
+		&row.ContactEmail, &row.ContactPhone, &row.Website, &row.Zipcode,
+		&row.FoundedYear, &row.CampusSize, &row.GalleryImages,
+		&row.IsPopular, &row.IsFeatured, &row.CreatedAt, &row.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return sqlc.College{}, errs.ErrNotFound
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return sqlc.College{}, fmt.Errorf("%w (slug=%v)", errs.ErrCollegeSlugTaken, deref(req.Slug))
+		}
+		if errors.As(err, &pgErr) && pgErr.Code == "22P02" {
+			return sqlc.College{}, errs.ErrNotFound
+		}
+		return sqlc.College{}, err
+	}
+	return row, nil
+}
+
 func (r *collegeRepository) ListByUniversity(ctx context.Context, universityID string, q pagination.Query) ([]sqlc.College, int64, error) {
 	total, err := r.queries.CountCollegesByUniversity(ctx, universityID)
 	if err != nil {
@@ -152,4 +263,19 @@ func (r *collegeRepository) Search(ctx context.Context, q string) ([]sqlc.Search
 		Similarity: q,
 		Limit:      int32(maxCollegeSearchResults),
 	})
+}
+
+func (r *collegeRepository) RepresentedIDs(ctx context.Context, ids []string) (map[string]struct{}, error) {
+	if len(ids) == 0 {
+		return map[string]struct{}{}, nil
+	}
+	rows, err := r.queries.ListRepresentedCollegeIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("list represented college ids: %w", err)
+	}
+	set := make(map[string]struct{}, len(rows))
+	for _, id := range rows {
+		set[id] = struct{}{}
+	}
+	return set, nil
 }

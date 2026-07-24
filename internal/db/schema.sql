@@ -255,7 +255,8 @@ CREATE TABLE public.users (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     role character varying(20) DEFAULT 'student'::character varying NOT NULL,
-    representative_university_id uuid
+    representative_university_id uuid,
+    representative_college_id uuid
 );
 
 
@@ -647,7 +648,10 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260706000001'),
     ('20260719000001'),
     ('20260720000001'),
-    ('20260720000002');
+    ('20260720000002'),
+    ('20260723000001'),
+    ('20260724000001'),
+    ('20260725000001');
 
 --
 -- Name: colleges; Type: TABLE; Schema: public; Owner: -
@@ -659,11 +663,24 @@ CREATE TABLE public.colleges (
     slug character varying(255) NOT NULL,
     university_id uuid NOT NULL,
     overview text NOT NULL,
+    excerpt character varying(500),
     country character varying(100),
     state character varying(100),
     city character varying(100),
     full_location character varying(255),
+    cover_image character varying(500),
     logo character varying(500),
+    institution_type character varying(50),
+    campus_setting character varying(50),
+    contact_email character varying(255),
+    contact_phone character varying(50),
+    website character varying(500),
+    zipcode character varying(20),
+    founded_year smallint,
+    campus_size character varying(100),
+    gallery_images text[],
+    is_popular boolean DEFAULT false NOT NULL,
+    is_featured boolean DEFAULT false NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -879,3 +896,161 @@ CREATE INDEX idx_university_claims_university_id ON public.university_claims USI
 --
 
 CREATE INDEX idx_university_claims_status ON public.university_claims USING btree (status, created_at DESC);
+
+
+--
+-- Name: college_claims; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.college_claims (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    college_id uuid NOT NULL,
+    full_name character varying(255) NOT NULL,
+    work_email character varying(255) NOT NULL,
+    document_url character varying(500) NOT NULL,
+    status character varying(20) DEFAULT 'pending'::character varying NOT NULL,
+    reviewer_id uuid,
+    reviewed_at timestamp with time zone,
+    review_note text,
+    created_user_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT college_claims_status_check CHECK (status::text = ANY (ARRAY['pending'::character varying, 'approved'::character varying, 'rejected'::character varying]::text[]))
+);
+
+
+--
+-- Name: college_claims college_claims_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.college_claims
+    ADD CONSTRAINT college_claims_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: college_claims college_claims_college_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.college_claims
+    ADD CONSTRAINT college_claims_college_id_fkey FOREIGN KEY (college_id) REFERENCES public.colleges(id) ON DELETE CASCADE;
+
+
+--
+-- Name: college_claims college_claims_reviewer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.college_claims
+    ADD CONSTRAINT college_claims_reviewer_id_fkey FOREIGN KEY (reviewer_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: college_claims college_claims_created_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.college_claims
+    ADD CONSTRAINT college_claims_created_user_id_fkey FOREIGN KEY (created_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: idx_college_claims_college_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_college_claims_college_id ON public.college_claims USING btree (college_id);
+
+
+--
+-- Name: idx_college_claims_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_college_claims_status ON public.college_claims USING btree (status, created_at DESC);
+
+
+--
+-- Name: users users_representative_college_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_representative_college_id_key UNIQUE (representative_college_id);
+
+
+--
+-- Name: users users_representative_college_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_representative_college_id_fkey FOREIGN KEY (representative_college_id) REFERENCES public.colleges(id) ON DELETE SET NULL;
+
+
+--
+-- Name: idx_users_representative_college_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_users_representative_college_id ON public.users USING btree (representative_college_id) WHERE representative_college_id IS NOT NULL;
+
+
+--
+-- Name: counselling_inquiries; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.counselling_inquiries (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    target_type character varying(20),
+    target_id uuid,
+    full_name character varying(255) NOT NULL,
+    email character varying(255) NOT NULL,
+    phone character varying(50),
+    country character varying(100),
+    preferred_university character varying(255),
+    program_of_interest character varying(255),
+    start_term character varying(100),
+    current_education character varying(100),
+    test_scores text,
+    message text,
+    resume_url character varying(500),
+    status character varying(20) DEFAULT 'pending'::character varying NOT NULL,
+    reviewer_id uuid,
+    reviewed_at timestamp with time zone,
+    review_note text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT counselling_inquiries_target_type_check CHECK (target_type::text IS NULL OR target_type::text = ANY (ARRAY['university'::character varying, 'college'::character varying]::text[])),
+    CONSTRAINT counselling_inquiries_target_pair_check CHECK (((target_type IS NULL) AND (target_id IS NULL)) OR ((target_type IS NOT NULL) AND (target_id IS NOT NULL))),
+    CONSTRAINT counselling_inquiries_status_check CHECK (status::text = ANY (ARRAY['pending'::character varying, 'reviewed'::character varying, 'archived'::character varying]::text[]))
+);
+
+
+--
+-- Name: counselling_inquiries counselling_inquiries_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.counselling_inquiries
+    ADD CONSTRAINT counselling_inquiries_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: counselling_inquiries counselling_inquiries_reviewer_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.counselling_inquiries
+    ADD CONSTRAINT counselling_inquiries_reviewer_id_fkey FOREIGN KEY (reviewer_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: idx_counselling_inquiries_target; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_counselling_inquiries_target ON public.counselling_inquiries USING btree (target_type, target_id, created_at DESC) WHERE (target_type IS NOT NULL);
+
+
+--
+-- Name: idx_counselling_inquiries_status_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_counselling_inquiries_status_created ON public.counselling_inquiries USING btree (status, created_at DESC);
+
+
+--
+-- Name: idx_counselling_inquiries_created_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_counselling_inquiries_created_at ON public.counselling_inquiries USING btree (created_at DESC);

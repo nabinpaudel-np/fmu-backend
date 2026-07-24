@@ -830,6 +830,33 @@ func (q *Queries) InsertUniversitySupportServices(ctx context.Context, arg Inser
 	return err
 }
 
+const listRepresentedUniversityIDs = `-- name: ListRepresentedUniversityIDs :many
+SELECT u.id
+FROM universities u
+JOIN users usr ON usr.representative_university_id = u.id
+WHERE u.id = ANY($1::uuid[])
+`
+
+func (q *Queries) ListRepresentedUniversityIDs(ctx context.Context, dollar_1 []string) ([]string, error) {
+	rows, err := q.db.Query(ctx, listRepresentedUniversityIDs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUniversities = `-- name: ListUniversities :many
 SELECT id, name, slug, overview, excerpt, country, state, city, full_location, cover_image, logo, institution_type, campus_setting, in_state_tuition, out_of_state_tuition, international_tuition, need_based_aid, merit_scholarships, work_study, no_application_fee, acceptance_rate, testing_policy, sat_range, act_range, on_campus_housing, freshmen_required_on_campus, contact_email, contact_phone, website, zipcode, tuition_min, tuition_max, avg_high_school_gpa, founded_year, campus_size, gallery_images, is_popular, is_featured, created_at, updated_at FROM universities ORDER BY name LIMIT $1 OFFSET $2
 `

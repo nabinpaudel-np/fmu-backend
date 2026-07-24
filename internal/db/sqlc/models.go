@@ -16,24 +16,75 @@ type Athletic struct {
 }
 
 type College struct {
-	ID           string
-	Name         string
-	Slug         string
-	UniversityID string
-	Overview     string
-	Country      *string
-	State        *string
-	City         *string
-	FullLocation *string
-	Logo         *string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID              string
+	Name            string
+	Slug            string
+	UniversityID    string
+	Overview        string
+	Excerpt         *string
+	Country         *string
+	State           *string
+	City            *string
+	FullLocation    *string
+	CoverImage      *string
+	Logo            *string
+	InstitutionType *string
+	CampusSetting   *string
+	ContactEmail    *string
+	ContactPhone    *string
+	Website         *string
+	Zipcode         *string
+	FoundedYear     *int16
+	CampusSize      *string
+	GalleryImages   []string
+	IsPopular       bool
+	IsFeatured      bool
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+type CollegeClaim struct {
+	ID            string
+	CollegeID     string
+	FullName      string
+	WorkEmail     string
+	DocumentUrl   string
+	Status        string
+	ReviewerID    pgtype.UUID
+	ReviewedAt    pgtype.Timestamptz
+	ReviewNote    *string
+	CreatedUserID pgtype.UUID
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 type CollegeFavorite struct {
 	UserID    string
 	CollegeID string
 	CreatedAt time.Time
+}
+
+type CounsellingInquiry struct {
+	ID                  string
+	TargetType          *string
+	TargetID            pgtype.UUID
+	FullName            string
+	Email               string
+	Phone               *string
+	Country             *string
+	PreferredUniversity *string
+	ProgramOfInterest   *string
+	StartTerm           *string
+	CurrentEducation    *string
+	TestScores          *string
+	Message             *string
+	ResumeUrl           *string
+	Status              string
+	ReviewerID          pgtype.UUID
+	ReviewedAt          pgtype.Timestamptz
+	ReviewNote          *string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 type DegreeLevel struct {
@@ -182,4 +233,5 @@ type User struct {
 	UpdatedAt                  time.Time
 	Role                       string
 	RepresentativeUniversityID pgtype.UUID
+	RepresentativeCollegeID    pgtype.UUID
 }

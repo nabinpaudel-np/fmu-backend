@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"fmu-backend/internal/auth"
 	"fmu-backend/internal/errs"
 	"fmu-backend/internal/pagination"
 )
@@ -18,6 +19,7 @@ type UniversityService interface {
 	Get(ctx context.Context, q pagination.Query, f Filters) ([]UniversityListItem, int64, error)
 	GetByID(ctx context.Context, id string) (*UniversityDetailResponse, error)
 	Search(ctx context.Context, q string) ([]UniversitySearchResult, error)
+	RepresentedIDs(ctx context.Context, ids []string) (map[string]struct{}, error)
 	Stats(ctx context.Context) (*StatsResponse, error)
 	GetMajors(ctx context.Context) ([]MajorResponse, error)
 	GetDegreeLevels(ctx context.Context) ([]DegreeLevelResponse, error)
@@ -56,6 +58,12 @@ func (s *universityService) Create(ctx context.Context, req *CreateUniversityReq
 }
 
 func (s *universityService) Patch(ctx context.Context, id string, req *PatchUniversityRequest) (*CreateUniversityResponse, error) {
+	if claims, err := auth.ClaimsFromContext(ctx); err == nil && claims.Role == auth.RoleRepresentative {
+		if req.Name != nil || req.Slug != nil {
+			return nil, errs.ErrRepCannotChangeNameOrSlug
+		}
+	}
+
 	row, err := s.repo.Patch(ctx, id, req)
 	if err != nil {
 		if errors.Is(err, errs.ErrNotFound) {
@@ -209,6 +217,15 @@ func (s *universityService) Search(ctx context.Context, q string) ([]UniversityS
 		items[i] = toUniversitySearchResult(row)
 	}
 	return items, nil
+}
+
+func (s *universityService) RepresentedIDs(ctx context.Context, ids []string) (map[string]struct{}, error) {
+	set, err := s.repo.RepresentedIDs(ctx, ids)
+	if err != nil {
+		log.Default().Printf("failed to list represented university ids: %v", err)
+		return nil, err
+	}
+	return set, nil
 }
 
 func (s *universityService) Stats(ctx context.Context) (*StatsResponse, error) {

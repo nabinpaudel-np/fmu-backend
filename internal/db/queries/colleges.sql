@@ -1,11 +1,51 @@
 -- name: CreateCollege :one
-INSERT INTO colleges (name, slug, university_id, overview, country, state, city, full_location, logo) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *;
+INSERT INTO colleges (
+    name, slug, university_id, overview, excerpt,
+    country, state, city, full_location,
+    cover_image, logo, institution_type, campus_setting,
+    contact_email, contact_phone, website, zipcode,
+    founded_year, campus_size, gallery_images,
+    is_popular, is_featured
+)
+VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8, $9,
+    $10, $11, $12, $13,
+    $14, $15, $16, $17,
+    $18, $19, $20,
+    $21, $22
+)
+RETURNING
+    id, name, slug, university_id, overview, excerpt,
+    country, state, city, full_location,
+    cover_image, logo, institution_type, campus_setting,
+    contact_email, contact_phone, website, zipcode,
+    founded_year, campus_size, gallery_images,
+    is_popular, is_featured, created_at, updated_at;
 
 -- name: GetCollegeByID :one
-SELECT * FROM colleges WHERE id = $1;
+SELECT
+    id, name, slug, university_id, overview, excerpt,
+    country, state, city, full_location,
+    cover_image, logo, institution_type, campus_setting,
+    contact_email, contact_phone, website, zipcode,
+    founded_year, campus_size, gallery_images,
+    is_popular, is_featured, created_at, updated_at
+FROM colleges
+WHERE id = $1;
 
 -- name: ListCollegesByUniversity :many
-SELECT * FROM colleges WHERE university_id = $1 ORDER BY name LIMIT $2 OFFSET $3;
+SELECT
+    id, name, slug, university_id, overview, excerpt,
+    country, state, city, full_location,
+    cover_image, logo, institution_type, campus_setting,
+    contact_email, contact_phone, website, zipcode,
+    founded_year, campus_size, gallery_images,
+    is_popular, is_featured, created_at, updated_at
+FROM colleges
+WHERE university_id = $1
+ORDER BY name
+LIMIT $2 OFFSET $3;
 
 -- name: CountCollegesByUniversity :one
 SELECT COUNT(*) FROM colleges WHERE university_id = $1;
@@ -47,3 +87,9 @@ ORDER BY GREATEST(
     similarity(u.slug, $1)
 ) DESC, c.name ASC
 LIMIT $2;
+
+-- name: ListRepresentedCollegeIDs :many
+SELECT c.id
+FROM colleges c
+JOIN users u ON u.representative_college_id = c.id
+WHERE c.id = ANY($1::uuid[]);

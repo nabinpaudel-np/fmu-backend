@@ -11,10 +11,49 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createCollegeRepresentativeUser = `-- name: CreateCollegeRepresentativeUser :one
+INSERT INTO users (full_name, email, password, role, representative_college_id, email_verified)
+VALUES ($1, $2, $3, 'representative', $4, true)
+RETURNING id, full_name, avatar, email, password, oauth_provider, oauth_id, email_verified, created_at, updated_at, role, representative_university_id, representative_college_id
+`
+
+type CreateCollegeRepresentativeUserParams struct {
+	FullName                string
+	Email                   string
+	Password                *string
+	RepresentativeCollegeID pgtype.UUID
+}
+
+func (q *Queries) CreateCollegeRepresentativeUser(ctx context.Context, arg CreateCollegeRepresentativeUserParams) (User, error) {
+	row := q.db.QueryRow(ctx, createCollegeRepresentativeUser,
+		arg.FullName,
+		arg.Email,
+		arg.Password,
+		arg.RepresentativeCollegeID,
+	)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.FullName,
+		&i.Avatar,
+		&i.Email,
+		&i.Password,
+		&i.Provider,
+		&i.ProviderID,
+		&i.EmailVerified,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Role,
+		&i.RepresentativeUniversityID,
+		&i.RepresentativeCollegeID,
+	)
+	return i, err
+}
+
 const createRepresentativeUser = `-- name: CreateRepresentativeUser :one
 INSERT INTO users (full_name, email, password, role, representative_university_id, email_verified)
 VALUES ($1, $2, $3, 'representative', $4, true)
-RETURNING id, full_name, avatar, email, password, oauth_provider, oauth_id, email_verified, created_at, updated_at, role, representative_university_id
+RETURNING id, full_name, avatar, email, password, oauth_provider, oauth_id, email_verified, created_at, updated_at, role, representative_university_id, representative_college_id
 `
 
 type CreateRepresentativeUserParams struct {
@@ -45,6 +84,7 @@ func (q *Queries) CreateRepresentativeUser(ctx context.Context, arg CreateRepres
 		&i.UpdatedAt,
 		&i.Role,
 		&i.RepresentativeUniversityID,
+		&i.RepresentativeCollegeID,
 	)
 	return i, err
 }
@@ -52,7 +92,7 @@ func (q *Queries) CreateRepresentativeUser(ctx context.Context, arg CreateRepres
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (full_name, email, password, role)
 VALUES ($1, $2, $3, $4)
-RETURNING id, full_name, avatar, email, password, oauth_provider, oauth_id, email_verified, created_at, updated_at, role, representative_university_id
+RETURNING id, full_name, avatar, email, password, oauth_provider, oauth_id, email_verified, created_at, updated_at, role, representative_university_id, representative_college_id
 `
 
 type CreateUserParams struct {
@@ -83,6 +123,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.UpdatedAt,
 		&i.Role,
 		&i.RepresentativeUniversityID,
+		&i.RepresentativeCollegeID,
 	)
 	return i, err
 }
@@ -90,7 +131,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 const createUserWithOAuth = `-- name: CreateUserWithOAuth :one
 INSERT INTO users (full_name, email, oauth_provider, oauth_id, avatar, email_verified, role)
 VALUES ($1, $2, $3, $4, $5, true, 'student')
-RETURNING id, full_name, avatar, email, password, oauth_provider, oauth_id, email_verified, created_at, updated_at, role, representative_university_id
+RETURNING id, full_name, avatar, email, password, oauth_provider, oauth_id, email_verified, created_at, updated_at, role, representative_university_id, representative_college_id
 `
 
 type CreateUserWithOAuthParams struct {
@@ -123,12 +164,13 @@ func (q *Queries) CreateUserWithOAuth(ctx context.Context, arg CreateUserWithOAu
 		&i.UpdatedAt,
 		&i.Role,
 		&i.RepresentativeUniversityID,
+		&i.RepresentativeCollegeID,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, full_name, avatar, email, password, oauth_provider, oauth_id, email_verified, created_at, updated_at, role, representative_university_id FROM users
+SELECT id, full_name, avatar, email, password, oauth_provider, oauth_id, email_verified, created_at, updated_at, role, representative_university_id, representative_college_id FROM users
 WHERE email = $1
 `
 
@@ -148,12 +190,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.UpdatedAt,
 		&i.Role,
 		&i.RepresentativeUniversityID,
+		&i.RepresentativeCollegeID,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, full_name, avatar, email, password, oauth_provider, oauth_id, email_verified, created_at, updated_at, role, representative_university_id FROM users
+SELECT id, full_name, avatar, email, password, oauth_provider, oauth_id, email_verified, created_at, updated_at, role, representative_university_id, representative_college_id FROM users
 WHERE id = $1
 `
 
@@ -173,12 +216,13 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
 		&i.UpdatedAt,
 		&i.Role,
 		&i.RepresentativeUniversityID,
+		&i.RepresentativeCollegeID,
 	)
 	return i, err
 }
 
 const getUserByProvider = `-- name: GetUserByProvider :one
-SELECT id, full_name, avatar, email, password, oauth_provider, oauth_id, email_verified, created_at, updated_at, role, representative_university_id FROM users
+SELECT id, full_name, avatar, email, password, oauth_provider, oauth_id, email_verified, created_at, updated_at, role, representative_university_id, representative_college_id FROM users
 WHERE oauth_provider = $1 AND oauth_id = $2
 `
 
@@ -203,6 +247,7 @@ func (q *Queries) GetUserByProvider(ctx context.Context, arg GetUserByProviderPa
 		&i.UpdatedAt,
 		&i.Role,
 		&i.RepresentativeUniversityID,
+		&i.RepresentativeCollegeID,
 	)
 	return i, err
 }
