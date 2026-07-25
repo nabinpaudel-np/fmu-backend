@@ -1,6 +1,6 @@
 -- name: CreateCollegeClaim :one
-INSERT INTO college_claims (college_id, full_name, work_email, document_url)
-VALUES ($1, $2, $3, $4)
+INSERT INTO college_claims (college_id, full_name, work_email, role, document_url)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: GetCollegeClaimByID :one
@@ -8,7 +8,7 @@ RETURNING *;
 -- alongside the claim row in a single round-trip.
 SELECT
     c.id, c.college_id, co.name AS college_name,
-    c.full_name, c.work_email, c.document_url,
+    c.full_name, c.work_email, c.role, c.document_url,
     c.status, c.reviewer_id, c.reviewed_at, c.review_note,
     c.created_user_id, c.created_at, c.updated_at
 FROM college_claims c
@@ -22,7 +22,7 @@ WHERE ($1::text IS NULL OR status = $1);
 -- name: ListCollegeClaims :many
 SELECT
     c.id, c.college_id, co.name AS college_name,
-    c.full_name, c.work_email, c.document_url,
+    c.full_name, c.work_email, c.role, c.document_url,
     c.status, c.reviewer_id, c.reviewed_at, c.review_note,
     c.created_user_id, c.created_at, c.updated_at
 FROM college_claims c

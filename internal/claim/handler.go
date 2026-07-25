@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -36,6 +37,7 @@ func (h *ClaimHandler) Submit(target ClaimTarget) http.HandlerFunc {
 			response.Error(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
+		req.Role = strings.TrimSpace(req.Role)
 		if err := validator.Validate.Struct(&req); err != nil {
 			fields := validator.GetValidationErrors(err)
 			response.ValidationError(w, http.StatusBadRequest, fields)

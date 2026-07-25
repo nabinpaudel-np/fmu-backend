@@ -21,7 +21,7 @@ SET status = 'approved',
     created_user_id = $4,
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, university_id, full_name, work_email, document_url, status, reviewer_id, reviewed_at, review_note, created_user_id, created_at, updated_at
+RETURNING id, university_id, full_name, work_email, role, document_url, status, reviewer_id, reviewed_at, review_note, created_user_id, created_at, updated_at
 `
 
 type ApproveUniversityClaimParams struct {
@@ -44,6 +44,7 @@ func (q *Queries) ApproveUniversityClaim(ctx context.Context, arg ApproveUnivers
 		&i.UniversityID,
 		&i.FullName,
 		&i.WorkEmail,
+		&i.Role,
 		&i.DocumentUrl,
 		&i.Status,
 		&i.ReviewerID,
@@ -81,15 +82,16 @@ func (q *Queries) CountUniversityClaims(ctx context.Context, dollar_1 string) (i
 }
 
 const createUniversityClaim = `-- name: CreateUniversityClaim :one
-INSERT INTO university_claims (university_id, full_name, work_email, document_url)
-VALUES ($1, $2, $3, $4)
-RETURNING id, university_id, full_name, work_email, document_url, status, reviewer_id, reviewed_at, review_note, created_user_id, created_at, updated_at
+INSERT INTO university_claims (university_id, full_name, work_email, role, document_url)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, university_id, full_name, work_email, role, document_url, status, reviewer_id, reviewed_at, review_note, created_user_id, created_at, updated_at
 `
 
 type CreateUniversityClaimParams struct {
 	UniversityID string
 	FullName     string
 	WorkEmail    string
+	Role         string
 	DocumentUrl  string
 }
 
@@ -98,6 +100,7 @@ func (q *Queries) CreateUniversityClaim(ctx context.Context, arg CreateUniversit
 		arg.UniversityID,
 		arg.FullName,
 		arg.WorkEmail,
+		arg.Role,
 		arg.DocumentUrl,
 	)
 	var i UniversityClaim
@@ -106,6 +109,7 @@ func (q *Queries) CreateUniversityClaim(ctx context.Context, arg CreateUniversit
 		&i.UniversityID,
 		&i.FullName,
 		&i.WorkEmail,
+		&i.Role,
 		&i.DocumentUrl,
 		&i.Status,
 		&i.ReviewerID,
@@ -121,7 +125,7 @@ func (q *Queries) CreateUniversityClaim(ctx context.Context, arg CreateUniversit
 const getUniversityClaimByID = `-- name: GetUniversityClaimByID :one
 SELECT
     c.id, c.university_id, u.name AS university_name,
-    c.full_name, c.work_email, c.document_url,
+    c.full_name, c.work_email, c.role, c.document_url,
     c.status, c.reviewer_id, c.reviewed_at, c.review_note,
     c.created_user_id, c.created_at, c.updated_at
 FROM university_claims c
@@ -135,6 +139,7 @@ type GetUniversityClaimByIDRow struct {
 	UniversityName string
 	FullName       string
 	WorkEmail      string
+	Role           string
 	DocumentUrl    string
 	Status         string
 	ReviewerID     pgtype.UUID
@@ -156,6 +161,7 @@ func (q *Queries) GetUniversityClaimByID(ctx context.Context, id string) (GetUni
 		&i.UniversityName,
 		&i.FullName,
 		&i.WorkEmail,
+		&i.Role,
 		&i.DocumentUrl,
 		&i.Status,
 		&i.ReviewerID,
@@ -171,7 +177,7 @@ func (q *Queries) GetUniversityClaimByID(ctx context.Context, id string) (GetUni
 const listUniversityClaims = `-- name: ListUniversityClaims :many
 SELECT
     c.id, c.university_id, u.name AS university_name,
-    c.full_name, c.work_email, c.document_url,
+    c.full_name, c.work_email, c.role, c.document_url,
     c.status, c.reviewer_id, c.reviewed_at, c.review_note,
     c.created_user_id, c.created_at, c.updated_at
 FROM university_claims c
@@ -193,6 +199,7 @@ type ListUniversityClaimsRow struct {
 	UniversityName string
 	FullName       string
 	WorkEmail      string
+	Role           string
 	DocumentUrl    string
 	Status         string
 	ReviewerID     pgtype.UUID
@@ -218,6 +225,7 @@ func (q *Queries) ListUniversityClaims(ctx context.Context, arg ListUniversityCl
 			&i.UniversityName,
 			&i.FullName,
 			&i.WorkEmail,
+			&i.Role,
 			&i.DocumentUrl,
 			&i.Status,
 			&i.ReviewerID,
@@ -245,7 +253,7 @@ SET status = 'rejected',
     review_note = $3,
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, university_id, full_name, work_email, document_url, status, reviewer_id, reviewed_at, review_note, created_user_id, created_at, updated_at
+RETURNING id, university_id, full_name, work_email, role, document_url, status, reviewer_id, reviewed_at, review_note, created_user_id, created_at, updated_at
 `
 
 type RejectUniversityClaimParams struct {
@@ -262,6 +270,7 @@ func (q *Queries) RejectUniversityClaim(ctx context.Context, arg RejectUniversit
 		&i.UniversityID,
 		&i.FullName,
 		&i.WorkEmail,
+		&i.Role,
 		&i.DocumentUrl,
 		&i.Status,
 		&i.ReviewerID,
