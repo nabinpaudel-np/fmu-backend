@@ -23,6 +23,10 @@ var allowedImageMimes = map[string]struct{}{
 
 var allowedDocumentMimes = map[string]struct{}{
 	"application/pdf": {},
+	"image/jpeg":      {},
+	"image/png":       {},
+	"image/webp":      {},
+	"image/gif":       {},
 }
 
 func isImagePurpose(p string) bool {
@@ -125,10 +129,8 @@ func (h *UploadsHandler) UploadImage(w http.ResponseWriter, r *http.Request) {
 	response.Success(w, http.StatusCreated, out)
 }
 
-// UploadDocument handles POST /api/v1/uploads/document?purpose=document. Only
-// PDFs are accepted — these are the verification documents attached to a
-// university claim. Uploaded as a Cloudinary "raw" resource so it can be
-// downloaded without any image transformations.
+// UploadDocument handles POST /api/v1/uploads/document?purpose=document. PDFs
+// and common image formats are stored in Supabase as claim verification proofs.
 func (h *UploadsHandler) UploadDocument(w http.ResponseWriter, r *http.Request) {
 	purpose := r.URL.Query().Get("purpose")
 	if !strings.EqualFold(purpose, "document") {
@@ -165,7 +167,7 @@ func (h *UploadsHandler) UploadDocument(w http.ResponseWriter, r *http.Request) 
 	mime := http.DetectContentType(head[:n])
 	if _, ok := allowedDocumentMimes[mime]; !ok {
 		response.Error(w, http.StatusUnsupportedMediaType,
-			fmt.Sprintf("mime type %s is not allowed (only application/pdf)", mime))
+			fmt.Sprintf("mime type %s is not allowed (only PDF and image files)", mime))
 		return
 	}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {

@@ -18,9 +18,8 @@ func RegisterRoutes(
 	// RequireUniversityEditor.
 	r.With(authMW, adminOrRepMW).Post("/api/v1/uploads/sign", h.Sign)
 	r.With(authMW, adminOrRepMW).Post("/api/v1/uploads/image", h.UploadImage)
-	// /document is fully public so anonymous claim submitters can upload
-	// their verification PDF without first having to register an account.
-	// The 20MB cap + Cloudinary quota are the abuse floor.
+	// /document is public so anonymous claim submitters can upload a PDF or
+	// image verification proof without first having to register an account.
 	r.Post("/api/v1/uploads/document", h.UploadDocument)
 	// /resume is public so anonymous counselling submitters can attach a
 	// CV without registering. PDF/DOC/DOCX, 5 MB cap.

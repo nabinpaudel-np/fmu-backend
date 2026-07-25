@@ -12,11 +12,9 @@ import (
 )
 
 const (
-	MaxImageBytes   int64 = 10 << 20 // 10 MiB
+	MaxImageBytes    int64 = 10 << 20 // 10 MiB
 	MaxDocumentBytes int64 = 20 << 20 // 20 MiB
 	MaxResumeBytes   int64 = 5 << 20  // 5 MiB
-
-	documentMimePDF = "application/pdf"
 )
 
 type UploadsService interface {
@@ -44,8 +42,7 @@ func (s *uploadsService) Sign(ctx context.Context, req SignUploadRequest) (SignU
 	if err != nil {
 		return SignUploadResponse{}, err
 	}
-	resourceType := resourceTypeForPurpose(req.Purpose)
-	payload, err := s.cld.SignUpload(folder, resourceType)
+	payload, err := s.cld.SignUpload(folder, "image")
 	if err != nil {
 		return SignUploadResponse{}, err
 	}
@@ -57,16 +54,6 @@ func (s *uploadsService) Sign(ctx context.Context, req SignUploadRequest) (SignU
 		Folder:       payload.Folder,
 		ResourceType: payload.ResourceType,
 	}, nil
-}
-
-// resourceTypeForPurpose maps an upload purpose to the Cloudinary resource
-// type the browser should POST to. Documents are uploaded as raw so they're
-// served from /raw/upload/ and remain downloadable; everything else is image.
-func resourceTypeForPurpose(purpose string) string {
-	if purpose == "document" {
-		return "raw"
-	}
-	return "image"
 }
 
 func (s *uploadsService) UploadImage(ctx context.Context, purpose string, file io.Reader) (UploadImageResponse, error) {
@@ -92,22 +79,20 @@ func (s *uploadsService) UploadImage(ctx context.Context, purpose string, file i
 	}, nil
 }
 
-// UploadDocument writes the file to Supabase Storage in the configured docs
-// bucket and returns a public URL. The frontend takes that URL and submits it
-// as document_url when posting a claim. We randomize the object name so the
-// public URL is non-enumerable.
 func (s *uploadsService) UploadDocument(ctx context.Context, purpose string, file io.Reader, mime string) (UploadDocumentResponse, error) {
-	if _, ok := AllowedPurposes[purpose]; !ok {
+	if purpose != "document" {
 		return UploadDocumentResponse{}, ErrInvalidPurpose
 	}
 	if s.supa == nil {
 		return UploadDocumentResponse{}, supabase.ErrNotConfigured
 	}
-	if mime == "" {
-		mime = documentMimePDF
+
+	ext, ok := documentExtensionForMime(mime)
+	if !ok {
+		return UploadDocumentResponse{}, ErrUnsupportedMime
 	}
 
-	name, err := randomObjectName("pdf")
+	name, err := randomObjectName(ext)
 	if err != nil {
 		return UploadDocumentResponse{}, fmt.Errorf("uploads: %w", err)
 	}
@@ -121,6 +106,23 @@ func (s *uploadsService) UploadDocument(ctx context.Context, purpose string, fil
 		Path:      res.Path,
 		Bytes:     res.Bytes,
 	}, nil
+}
+
+func documentExtensionForMime(mime string) (string, bool) {
+	switch mime {
+	case "application/pdf":
+		return "pdf", true
+	case "image/jpeg":
+		return "jpg", true
+	case "image/png":
+		return "png", true
+	case "image/webp":
+		return "webp", true
+	case "image/gif":
+		return "gif", true
+	default:
+		return "", false
+	}
 }
 
 // UploadResume stores a CV/resume in the same Supabase documents bucket but
