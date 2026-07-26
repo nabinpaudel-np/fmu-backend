@@ -25,6 +25,7 @@ func (t ClaimTarget) IsValid() bool {
 type SubmitClaimRequest struct {
 	FullName    string `json:"full_name"    validate:"required,min=2,max=255"`
 	WorkEmail   string `json:"work_email"   validate:"required,email,max=255"`
+	Role        string `json:"role"         validate:"required,min=2,max=100"`
 	DocumentURL string `json:"document_url" validate:"required,url,max=500"`
 }
 
@@ -48,6 +49,7 @@ type ClaimListItem struct {
 	TargetName    string      `json:"target_name"`
 	FullName      string      `json:"full_name"`
 	WorkEmail     string      `json:"work_email"`
+	Role          string      `json:"role"`
 	DocumentURL   string      `json:"document_url"`
 	Status        string      `json:"status"`
 	ReviewerID    *string     `json:"reviewer_id,omitempty"`

@@ -2,15 +2,13 @@ package uploads
 
 // allowed purpose values for /sign — frontend passes one of these to
 var AllowedPurposes = map[string]struct{}{
-	"logo":     {},
-	"cover":    {},
-	"gallery":  {},
-	"document": {},
-	"resume":   {},
+	"logo":    {},
+	"cover":   {},
+	"gallery": {},
 }
 
 type SignUploadRequest struct {
-	Purpose string `json:"purpose" validate:"required,oneof=logo cover gallery document"`
+	Purpose string `json:"purpose" validate:"required,oneof=logo cover gallery"`
 }
 
 type SignUploadResponse struct {

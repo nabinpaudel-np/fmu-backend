@@ -1,6 +1,6 @@
 -- name: CreateUniversityClaim :one
-INSERT INTO university_claims (university_id, full_name, work_email, document_url)
-VALUES ($1, $2, $3, $4)
+INSERT INTO university_claims (university_id, full_name, work_email, role, document_url)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: GetUniversityClaimByID :one
@@ -8,7 +8,7 @@ RETURNING *;
 -- alongside the claim row in a single round-trip.
 SELECT
     c.id, c.university_id, u.name AS university_name,
-    c.full_name, c.work_email, c.document_url,
+    c.full_name, c.work_email, c.role, c.document_url,
     c.status, c.reviewer_id, c.reviewed_at, c.review_note,
     c.created_user_id, c.created_at, c.updated_at
 FROM university_claims c
@@ -22,7 +22,7 @@ WHERE ($1::text IS NULL OR status = $1);
 -- name: ListUniversityClaims :many
 SELECT
     c.id, c.university_id, u.name AS university_name,
-    c.full_name, c.work_email, c.document_url,
+    c.full_name, c.work_email, c.role, c.document_url,
     c.status, c.reviewer_id, c.reviewed_at, c.review_note,
     c.created_user_id, c.created_at, c.updated_at
 FROM university_claims c

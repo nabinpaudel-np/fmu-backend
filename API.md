@@ -1639,12 +1639,12 @@ curl -b cookies.txt -X PATCH http://localhost:3000/api/v1/colleges/9a4f1b32-8e57
 
 ## Uploads endpoints
 
-The API has three upload endpoints covering two storage backends:
+The API has four upload endpoints covering two storage backends:
 
 - **Photos** (`logo`, `cover`, `gallery`) → **Cloudinary** (free tier — 25 monthly credits, 25 GB storage). The browser uploads directly to Cloudinary; the backend signs the request but never sees the bytes.
-- **Documents** (`document` — PDFs only) → **Supabase Storage** (free tier — 1 GB). The backend streams the file from the client and returns a public URL.
+- **Claim proofs** (`document` — PDFs and common image files) and **resumes** → **Supabase Storage** (free tier — 1 GB). The backend streams these files from the client and returns public URLs.
 
-This split keeps Cloudinary's image-optimization features (transformations, format negotiation) where they're useful and uses a dedicated doc store where they aren't. Photo endpoints require an authenticated admin or representative; the document endpoint is public so anonymous claim submitters can upload verification PDFs without first creating an account.
+This split keeps Cloudinary's image-optimization features (transformations, format negotiation) for university and college branding assets, while claim proofs and counselling resumes use a dedicated document store. Photo endpoints require an authenticated admin or representative; claim-proof and resume endpoints are public so anonymous users can submit forms without first creating an account.
 
 ### End-to-end flow (photo upload — logo/cover/gallery)
 
@@ -1669,7 +1669,7 @@ This split keeps Cloudinary's image-optimization features (transformations, form
 └────────────┘                                                     │
 ```
 
-Each purpose (`logo`, `cover`, `gallery`) maps to a Cloudinary folder: `fmu/{APP_ENV}/{purpose}/`. Files auto-receive a unique filename on Cloudinary's side; overwrite is disabled. Documents use a different flow — see [`POST /api/v1/uploads/document`](#post-apiv1uploadsdocument) below.
+Each purpose (`logo`, `cover`, `gallery`) maps to a Cloudinary folder: `fmu/{APP_ENV}/{purpose}/`. Files auto-receive a unique filename on Cloudinary's side; overwrite is disabled. Claim proofs use the Supabase flow described below.
 
 ### POST `/api/v1/uploads/sign`
 
@@ -1682,7 +1682,7 @@ Returns a one-shot signed-upload payload. Send it (along with the file) directly
 { "purpose": "logo" }
 ```
 
-`purpose` must be one of `logo`, `cover`, `gallery`, `document`. The response's `resource_type` field tells the frontend which Cloudinary endpoint to POST the file to — `image` for branding assets, `raw` for documents. Uploading a PDF to the `image` endpoint results in a `/image/upload/...pdf` URL that returns 401 on access; always use the `resource_type` from the response.
+`purpose` must be one of `logo`, `cover`, `gallery`. All signed uploads use Cloudinary's `image` resource type; claim proofs are uploaded through Supabase using [`POST /api/v1/uploads/document`](#post-apiv1uploadsdocument).
 
 **Response:** `200 OK`
 ```json
@@ -1693,8 +1693,8 @@ Returns a one-shot signed-upload payload. Send it (along with the file) directly
     "api_key": "123456789012345",
     "timestamp": 1715000000,
     "signature": "abc123...",
-    "folder": "fmu/development/document",
-    "resource_type": "raw"
+    "folder": "fmu/development/logo",
+    "resource_type": "image"
   }
 }
 ```
@@ -1767,18 +1767,18 @@ Optional server-side fallback for clients that cannot reach Cloudinary directly.
 
 ### Storage / deletion
 
-Cloudinary assets are referenced by URL in the database, not by FK. There is no automatic cleanup yet — when an `Update /universities/{id}` endpoint lands, replacing a logo/cover will best-effort `destroy` the previous Cloudinary public id in a goroutine (log-and-continue; never block the DB write on a Cloudinary outage).
+Cloudinary branding assets are referenced by URL in the database, not by FK. There is no automatic cleanup when a university or college logo, cover, or gallery image is replaced.
 
 ### POST `/api/v1/uploads/document`
 
-Upload a verification document (PDF only) to Supabase Storage. Returns a public URL that the frontend submits as `document_url` when [filing a university claim](#submit-a-claim). Unlike photo uploads, the file streams **through** the backend — there's no signed-redirect flow because documents are uploaded by anonymous users who don't have credentials yet.
+Upload a verification document or image (PDF, JPEG, PNG, WebP, or GIF) to Supabase Storage. Returns a public URL that the frontend submits as `document_url` when [filing a university or college claim](#submit-a-claim). Unlike photo uploads, the file streams **through** the backend — there's no signed-redirect flow because claimants may be anonymous.
 
 **Auth:** public. The endpoint is intentionally unauthenticated so anyone can submit a claim without first registering.
 
 **Query parameters:**
 - `purpose` (required) — must be `document`. Any other value returns `400`.
 
-**Request body:** `multipart/form-data` with a single `file` field. **Max 20 MiB.** Allowlisted MIME: `application/pdf` (detected from the first 512 bytes of the file — form headers are not trusted).
+**Request body:** `multipart/form-data` with a single `file` field. **Max 20 MiB.** Allowlisted MIME types: `application/pdf`, `image/jpeg`, `image/png`, `image/webp`, and `image/gif` (detected from the first 512 bytes of the file — form headers are not trusted).
 
 **Response:** `201 Created`
 ```json
@@ -1798,30 +1798,30 @@ Upload a verification document (PDF only) to Supabase Storage. Returns a public 
 | `path`       | string | Storage key (`{bucket}/{filename}`). Reserved for future signed-URL flow; currently informational. |
 | `bytes`      | int    | Size of the stored file in bytes.                                     |
 
-**Object naming:** the server generates a random 32-char hex filename (e.g. `4f8b2c1d9e3a7f6b5c0d2e8a1b9c4d7e.pdf`). The bucket is public, but the filename is non-enumerable — guessing one is computationally infeasible.
+**Object naming:** the server generates a random 32-char hex filename and appends an extension derived from the detected MIME (for example, `4f8b2c1d9e3a7f6b5c0d2e8a1b9c4d7e.pdf` or `.jpg`). The bucket is public, but the filename is non-enumerable — guessing one is computationally infeasible.
 
 **Errors:**
 - `400` — `purpose` missing or not `document`
 - `400` — no `file` field in the multipart body
 - `400` — file is empty
 - `413` — file exceeds 20 MiB
-- `415` — mime type is not `application/pdf` (other MIME types are rejected before the file is forwarded to Supabase)
-- `500` — Supabase client not configured (missing `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` env vars)
-- `502` — Supabase rejected the upload (network error, auth failure, or bucket missing)
+- `415` — mime type is not PDF or one of `image/jpeg`, `image/png`, `image/webp`, or `image/gif` (other MIME types are rejected before the file is forwarded to Supabase)
+- `502` — Supabase upload failed because the client is not configured, the network request failed, authentication failed, or the bucket is missing
 
 **Full claim submission example:**
 
 ```bash
-# 1. Upload the PDF — get back a public URL
+# 1. Upload the PDF or image proof — get back a public URL
 URL=$(curl -s -X POST "http://localhost:3000/api/v1/uploads/document?purpose=document" \
   -F "file=@/path/to/proof.pdf" | jq -r '.data.secure_url')
 
-# 2. Submit the claim with that URL
+# 2. Submit the claim with that URL and the claimant's role
 curl -X POST "http://localhost:3000/api/v1/claims/universities/<university-uuid>" \
   -H "Content-Type: application/json" \
   -d "{
     \"full_name\": \"Ada Lovelace\",
     \"work_email\": \"ada@mit.edu\",
+    \"role\": \"Director of Admissions\",
     \"document_url\": \"$URL\"
   }"
 ```
@@ -1910,7 +1910,7 @@ request. Items are ordered by favorite-time, newest first. Supports
 
 ## Claim endpoints
 
-Anyone can submit a claim to become the official representative of a university or college. Admins review both target types in one dashboard. Approving a claim creates a new `representative` user bound to that one target and returns a one-time plaintext password the admin must deliver securely.
+Anyone can submit a claim to become the official representative of a university or college. Each submission must include the claimant's role at that institution. Admins review both target types in one dashboard. Approving a claim creates a new `representative` user bound to that one target and returns a one-time plaintext password the admin must deliver securely.
 
 **Public submission:**
 
@@ -1937,7 +1937,7 @@ Choose the route from the target type; both accept the same JSON body:
 - University: `POST /api/v1/claims/universities/{university_id}`
 - College: `POST /api/v1/claims/colleges/{college_id}`
 
-The `document_url` comes from a separate public `POST /api/v1/uploads/document?purpose=document` upload. That upload accepts PDF files up to 20 MiB and returns the URL as `data.secure_url`.
+The `document_url` comes from a separate public `POST /api/v1/uploads/document?purpose=document` upload. That upload accepts PDF, JPEG, PNG, WebP, and GIF files up to 20 MiB and returns the URL as `data.secure_url`. The required `role` describes the claimant's role at the university or college; it is not the authenticated account role.
 
 **Request body:**
 
@@ -1945,6 +1945,7 @@ The `document_url` comes from a separate public `POST /api/v1/uploads/document?p
 {
   "full_name": "Ada Lovelace",
   "work_email": "ada@mit.edu",
+  "role": "Director of Admissions",
   "document_url": "https://abcdefghijk.supabase.co/storage/v1/object/public/documents/4f8b2c1d9e3a7f6b5c0d2e8a1b9c4d7e.pdf"
 }
 ```
@@ -1953,9 +1954,10 @@ The `document_url` comes from a separate public `POST /api/v1/uploads/document?p
 |-------|------|-------|
 | `full_name` | string | required, 2–255 chars |
 | `work_email` | string | required, valid email, max 255 chars |
+| `role` | string | required, 2–100 chars; the claimant's role at the target institution |
 | `document_url` | string | required, valid URL, max 500 chars |
 
-`full_name` and `work_email` are trimmed before storage.
+`full_name`, `work_email`, and `role` are trimmed before storage.
 
 **College example:**
 
@@ -1965,6 +1967,7 @@ curl -X POST http://localhost:3000/api/v1/claims/colleges/9a4f1b32-8e57-4c2f-bd6
   -d '{
     "full_name": "Ada Lovelace",
     "work_email": "ada@mit.edu",
+    "role": "Director of Admissions",
     "document_url": "https://abcdefghijk.supabase.co/storage/v1/object/public/documents/4f8b2c1d9e3a7f6b5c0d2e8a1b9c4d7e.pdf"
   }'
 ```
@@ -2027,6 +2030,7 @@ curl -b cookies.txt 'http://localhost:3000/api/v1/admin/claims?type=college&stat
         "target_name": "MIT College of Engineering",
         "full_name": "Ada Lovelace",
         "work_email": "ada@mit.edu",
+        "role": "Director of Admissions",
         "document_url": "https://abcdefghijk.supabase.co/storage/v1/object/public/documents/4f8b2c1d9e3a7f6b5c0d2e8a1b9c4d7e.pdf",
         "status": "pending",
         "created_at": "2026-07-23T10:55:59Z",
@@ -2057,6 +2061,7 @@ type ClaimItem = {
   target_name: string
   full_name: string
   work_email: string
+  role: string
   document_url: string
   status: 'pending' | 'approved' | 'rejected'
   reviewer_id?: string
@@ -2118,6 +2123,7 @@ curl -b cookies.txt -X POST http://localhost:3000/api/v1/admin/claims/f8b6d642-8
       "target_name": "MIT College of Engineering",
       "full_name": "Ada Lovelace",
       "work_email": "ada@mit.edu",
+      "role": "Director of Admissions",
       "document_url": "https://abcdefghijk.supabase.co/storage/v1/object/public/documents/4f8b2c1d9e3a7f6b5c0d2e8a1b9c4d7e.pdf",
       "status": "approved",
       "reviewer_id": "<admin-uuid>",
@@ -2134,6 +2140,8 @@ curl -b cookies.txt -X POST http://localhost:3000/api/v1/admin/claims/f8b6d642-8
   }
 }
 ```
+
+The nested `claim.role` is the claimant's stated role at the institution. The top-level `data.role` is the new account's authentication role and is always `representative`.
 
 The new user receives `representative_university_id = target_id` for a university claim or `representative_college_id = target_id` for a college claim. The representative can log in immediately with `email` and `plain_password`.
 
@@ -2172,6 +2180,7 @@ curl -b cookies.txt -X POST http://localhost:3000/api/v1/admin/claims/f8b6d642-8
       "target_name": "MIT College of Engineering",
       "full_name": "Ada Lovelace",
       "work_email": "ada@mit.edu",
+      "role": "Director of Admissions",
       "document_url": "https://abcdefghijk.supabase.co/storage/v1/object/public/documents/4f8b2c1d9e3a7f6b5c0d2e8a1b9c4d7e.pdf",
       "status": "rejected",
       "reviewer_id": "<admin-uuid>",
@@ -2561,8 +2570,8 @@ curl http://localhost:3000/api/v1/universities/lookups
 - [ ] Admin promotion: not a frontend concern; backend operator runs the SQL
 - [ ] "Become a representative" claim form (public):
   - Determine whether the user is claiming a university or college and retain that target's ID
-  - Upload the verification PDF first: `POST /uploads/document?purpose=document` (multipart, ≤ 20 MiB, PDF only; no auth required)
-  - Submit `{full_name, work_email, document_url}` to `/claims/universities/{id}` or `/claims/colleges/{id}`
+  - Upload the verification PDF or image first: `POST /uploads/document?purpose=document` (multipart, ≤ 20 MiB, PDF/JPEG/PNG/WebP/GIF; no auth required)
+  - Submit `{full_name, work_email, role, document_url}` to `/claims/universities/{id}` or `/claims/colleges/{id}`
   - Read the unified response as `{claim_id, type, target_id, status, created_at}`
 - [ ] Admin claims dashboard:
   - Prefer `GET /admin/claims?type=university&status=pending&page=N` and a separate `type=college` view for deterministic pagination

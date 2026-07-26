@@ -119,7 +119,7 @@ func (s *claimService) Submit(ctx context.Context, target ClaimTarget, targetID 
 			}
 			return nil, err
 		}
-		row, err := s.uniRepo.Create(ctx, targetID, strings.TrimSpace(req.FullName), strings.TrimSpace(req.WorkEmail), req.DocumentURL)
+		row, err := s.uniRepo.Create(ctx, targetID, strings.TrimSpace(req.FullName), strings.TrimSpace(req.WorkEmail), strings.TrimSpace(req.Role), req.DocumentURL)
 		if err != nil {
 			log.Default().Printf("submit university claim: %v", err)
 			return nil, err
@@ -139,7 +139,7 @@ func (s *claimService) Submit(ctx context.Context, target ClaimTarget, targetID 
 			}
 			return nil, err
 		}
-		row, err := s.colRepo.Create(ctx, targetID, strings.TrimSpace(req.FullName), strings.TrimSpace(req.WorkEmail), req.DocumentURL)
+		row, err := s.colRepo.Create(ctx, targetID, strings.TrimSpace(req.FullName), strings.TrimSpace(req.WorkEmail), strings.TrimSpace(req.Role), req.DocumentURL)
 		if err != nil {
 			log.Default().Printf("submit college claim: %v", err)
 			return nil, err

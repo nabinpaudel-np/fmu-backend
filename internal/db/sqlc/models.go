@@ -48,6 +48,7 @@ type CollegeClaim struct {
 	CollegeID     string
 	FullName      string
 	WorkEmail     string
+	Role          string
 	DocumentUrl   string
 	Status        string
 	ReviewerID    pgtype.UUID
@@ -179,6 +180,7 @@ type UniversityClaim struct {
 	UniversityID  string
 	FullName      string
 	WorkEmail     string
+	Role          string
 	DocumentUrl   string
 	Status        string
 	ReviewerID    pgtype.UUID

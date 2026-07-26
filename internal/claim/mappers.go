@@ -19,6 +19,7 @@ type claimJoinRow struct {
 	TargetName    string
 	FullName      string
 	WorkEmail     string
+	Role          string
 	DocumentURL   string
 	Status        string
 	ReviewerID    pgtype.UUID
@@ -37,6 +38,7 @@ func fromUniGetRow(r sqlc.GetUniversityClaimByIDRow) claimJoinRow {
 		TargetName:    r.UniversityName,
 		FullName:      r.FullName,
 		WorkEmail:     r.WorkEmail,
+		Role:          r.Role,
 		DocumentURL:   r.DocumentUrl,
 		Status:        r.Status,
 		ReviewerID:    r.ReviewerID,
@@ -56,6 +58,7 @@ func fromUniListRow(r sqlc.ListUniversityClaimsRow) claimJoinRow {
 		TargetName:    r.UniversityName,
 		FullName:      r.FullName,
 		WorkEmail:     r.WorkEmail,
+		Role:          r.Role,
 		DocumentURL:   r.DocumentUrl,
 		Status:        r.Status,
 		ReviewerID:    r.ReviewerID,
@@ -75,6 +78,7 @@ func fromColGetRow(r sqlc.GetCollegeClaimByIDRow) claimJoinRow {
 		TargetName:    r.CollegeName,
 		FullName:      r.FullName,
 		WorkEmail:     r.WorkEmail,
+		Role:          r.Role,
 		DocumentURL:   r.DocumentUrl,
 		Status:        r.Status,
 		ReviewerID:    r.ReviewerID,
@@ -94,6 +98,7 @@ func fromColListRow(r sqlc.ListCollegeClaimsRow) claimJoinRow {
 		TargetName:    r.CollegeName,
 		FullName:      r.FullName,
 		WorkEmail:     r.WorkEmail,
+		Role:          r.Role,
 		DocumentURL:   r.DocumentUrl,
 		Status:        r.Status,
 		ReviewerID:    r.ReviewerID,
@@ -113,6 +118,7 @@ func toClaimListItem(c claimJoinRow) ClaimListItem {
 		TargetName:    c.TargetName,
 		FullName:      c.FullName,
 		WorkEmail:     c.WorkEmail,
+		Role:          c.Role,
 		DocumentURL:   c.DocumentURL,
 		Status:        c.Status,
 		ReviewerID:    uuidStringPtr(c.ReviewerID),

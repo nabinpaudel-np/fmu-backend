@@ -12,7 +12,7 @@ import (
 // the service can depend on a narrow interface (and so swapping in a fake
 // for tests is trivial).
 type UniversityClaimRepository interface {
-	Create(ctx context.Context, universityID, fullName, workEmail, documentURL string) (sqlc.UniversityClaim, error)
+	Create(ctx context.Context, universityID, fullName, workEmail, role, documentURL string) (sqlc.UniversityClaim, error)
 	GetByID(ctx context.Context, id string) (sqlc.GetUniversityClaimByIDRow, error)
 	List(ctx context.Context, statusFilter string, limit, offset int32) ([]sqlc.ListUniversityClaimsRow, error)
 	Count(ctx context.Context, statusFilter string) (int64, error)
@@ -29,11 +29,12 @@ func NewUniversityClaimRepository(queries *sqlc.Queries) UniversityClaimReposito
 	return &universityClaimRepository{queries: queries}
 }
 
-func (r *universityClaimRepository) Create(ctx context.Context, universityID, fullName, workEmail, documentURL string) (sqlc.UniversityClaim, error) {
+func (r *universityClaimRepository) Create(ctx context.Context, universityID, fullName, workEmail, role, documentURL string) (sqlc.UniversityClaim, error) {
 	return r.queries.CreateUniversityClaim(ctx, sqlc.CreateUniversityClaimParams{
 		UniversityID: universityID,
 		FullName:     fullName,
 		WorkEmail:    workEmail,
+		Role:         role,
 		DocumentUrl:  documentURL,
 	})
 }
@@ -78,7 +79,7 @@ func (r *universityClaimRepository) Reject(ctx context.Context, claimID, reviewe
 // CollegeClaimRepository wraps the college-specific sqlc queries. Sibling
 // to UniversityClaimRepository.
 type CollegeClaimRepository interface {
-	Create(ctx context.Context, collegeID, fullName, workEmail, documentURL string) (sqlc.CollegeClaim, error)
+	Create(ctx context.Context, collegeID, fullName, workEmail, role, documentURL string) (sqlc.CollegeClaim, error)
 	GetByID(ctx context.Context, id string) (sqlc.GetCollegeClaimByIDRow, error)
 	List(ctx context.Context, statusFilter string, limit, offset int32) ([]sqlc.ListCollegeClaimsRow, error)
 	Count(ctx context.Context, statusFilter string) (int64, error)
@@ -95,11 +96,12 @@ func NewCollegeClaimRepository(queries *sqlc.Queries) CollegeClaimRepository {
 	return &collegeClaimRepository{queries: queries}
 }
 
-func (r *collegeClaimRepository) Create(ctx context.Context, collegeID, fullName, workEmail, documentURL string) (sqlc.CollegeClaim, error) {
+func (r *collegeClaimRepository) Create(ctx context.Context, collegeID, fullName, workEmail, role, documentURL string) (sqlc.CollegeClaim, error) {
 	return r.queries.CreateCollegeClaim(ctx, sqlc.CreateCollegeClaimParams{
 		CollegeID:   collegeID,
 		FullName:    fullName,
 		WorkEmail:   workEmail,
+		Role:        role,
 		DocumentUrl: documentURL,
 	})
 }
