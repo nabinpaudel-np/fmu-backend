@@ -98,6 +98,15 @@ type Major struct {
 	Name string
 }
 
+type Program struct {
+	ID          string
+	Title       string
+	Description string
+	DegreeID    string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
 type RefreshToken struct {
 	ID        string
 	Token     string

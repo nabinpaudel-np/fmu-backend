@@ -25,8 +25,9 @@ Backend API for the FMU (Find My University) application. This document covers e
 12. [Favorites endpoints](#favorites-endpoints)
 13. [Claim endpoints](#claim-endpoints)
 14. [Lookup reference data](#lookup-reference-data)
-15. [Frontend integration checklist](#putting-it-all-together--frontend-integration-checklist)
-16. [CORS](#cors)
+15. [Program endpoints](#program-endpoints)
+16. [Frontend integration checklist](#putting-it-all-together--frontend-integration-checklist)
+17. [CORS](#cors)
 
 ---
 
@@ -2496,7 +2497,7 @@ Same request/response shapes as the admin counterparts; same auth role gating (`
 
 ## Lookup reference data
 
-These endpoints return reference data the frontend can cache locally (it rarely changes). Each single-list endpoint returns `{ items: [{ id, name }] }`. The bundled `/lookups` endpoint returns all six lists in one object.
+These endpoints return reference data the frontend can cache locally (it rarely changes). Each single-list endpoint returns `{ items: [{ id, name }] }`. The bundled `/lookups` endpoint returns all seven lists in one object.
 
 | Endpoint                                       | Returns               |
 |------------------------------------------------|-----------------------|
@@ -2506,7 +2507,7 @@ These endpoints return reference data the frontend can cache locally (it rarely 
 | `GET /api/v1/universities/special-affiliations`| All affiliations      |
 | `GET /api/v1/universities/athletics`           | All athletic divisions|
 | `GET /api/v1/universities/support-services`    | All support services  |
-| `GET /api/v1/universities/lookups`             | All six lists, bundled |
+| `GET /api/v1/universities/lookups`             | All seven lists, bundled |
 
 **All auth:** public
 
@@ -2540,12 +2541,118 @@ curl http://localhost:3000/api/v1/universities/lookups
     "study_formats": [ { "id": "...", "name": "Hybrid / Blended" } ],
     "special_affiliations": [ { "id": "...", "name": "HBCU" } ],
     "athletics": [ { "id": "...", "name": "NCAA Division I" } ],
-    "support_services": [ { "id": "...", "name": "International Student Center" } ]
+    "support_services": [ { "id": "...", "name": "International Student Center" } ],
+    "programs": [ { "id": "...", "title": "BSc Computer Science", "degree_id": "..." } ]
   }
 }
 ```
 
 **Recommended frontend caching strategy:** fetch `/lookups` once on app load, store in a JS map keyed by ID. The detail endpoint already includes the resolved `name` for every lookup, so the cache is mainly useful when building forms (create university admin UI).
+
+---
+
+## Program endpoints
+
+Programs are catalog content the admin curates. Each program is bound to one existing degree level (FK to `degree_levels`). Reads are public; writes are admin-only.
+
+| Endpoint                       | Auth  |
+|--------------------------------|-------|
+| `GET /api/v1/programs`         | public |
+| `GET /api/v1/programs/{id}`    | public |
+| `POST /api/v1/programs`        | admin |
+| `DELETE /api/v1/programs/{id}` | admin |
+
+### GET `/api/v1/programs`
+
+List programs with pagination. Filter by `degree_id` to return only programs under one degree.
+
+**Auth:** public
+
+#### Pagination
+
+| Param       | Type | Default | Notes                              |
+|-------------|------|---------|------------------------------------|
+| `page`      | int  | `1`     | 1-indexed                          |
+| `page_size` | int  | `20`    | Max 100 (silently capped)          |
+
+#### Filters
+
+| Param        | Type | Notes                                  |
+|--------------|------|----------------------------------------|
+| `degree_id`  | uuid | Restrict to programs under one degree  |
+
+**Example:**
+```bash
+curl 'http://localhost:3000/api/v1/programs?degree_id=5b7e1c91-006a-407b-a9bd-609f60cefa0a&page=1&page_size=20'
+```
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "a8b9...-c0d1",
+        "title": "BSc Computer Science",
+        "description": "Four-year undergraduate program covering...",
+        "degree_id": "5b7e1c91-006a-407b-a9bd-609f60cefa0a",
+        "created_at": "2026-07-27T10:00:00Z",
+        "updated_at": "2026-07-27T10:00:00Z"
+      }
+    ],
+    "meta": { "page": 1, "page_size": 20, "total": 1, "total_pages": 1 }
+  }
+}
+```
+
+### GET `/api/v1/programs/{id}`
+
+Fetch a single program by id.
+
+**Auth:** public
+
+```bash
+curl http://localhost:3000/api/v1/programs/a8b9...-c0d1
+```
+
+### POST `/api/v1/programs`
+
+Create a program. `degree_id` must reference an existing `degree_levels` row.
+
+**Auth:** admin
+
+```bash
+curl -X POST http://localhost:3000/api/v1/programs \
+  -H 'Authorization: Bearer <admin-access-token>' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "title": "BSc Computer Science",
+    "description": "Four-year undergraduate program covering...",
+    "degree_id": "5b7e1c91-006a-407b-a9bd-609f60cefa0a"
+  }'
+```
+
+**Validation errors:**
+
+| Field         | Rules                |
+|---------------|----------------------|
+| `title`       | required, 1–255 chars|
+| `description` | required             |
+| `degree_id`   | required, valid UUID |
+
+A missing `degree_id` returns `400 { "error": "degree does not exist (degree_id=...)" }`.
+
+### DELETE `/api/v1/programs/{id}`
+
+Delete a program. A `degree_levels` row that still has programs cannot be deleted (FK `ON DELETE RESTRICT`); remove its programs first.
+
+**Auth:** admin
+
+```bash
+curl -X DELETE http://localhost:3000/api/v1/programs/a8b9...-c0d1 \
+  -H 'Authorization: Bearer <admin-access-token>'
+```
+
+Returns `204 No Content` on success, `404` if the id does not exist.
 
 ---
 
@@ -2560,6 +2667,7 @@ curl http://localhost:3000/api/v1/universities/lookups
 - [ ] University detail page — affiliated colleges list: `GET /universities/{id}/colleges` (or `GET /colleges?university_id={id}` with filters). Each college row carries `has_representative` for the same banner logic.
 - [ ] College list page: `GET /colleges?page=N&page_size=20&<filters>` (`university_id`, `country`, `state_province`, `city`). Use `has_representative` on each row to hide the claim banner.
 - [ ] College search box: `GET /colleges/search?q=<term>` — debounced; one search box covers college name, college location, and parent university name/slug. Results embed the parent university and `is_favorited`/`has_representative`, so a single render call is enough.
+- [ ] Program listing/filtering: `GET /programs?degree_id=<uuid>` for a degree-scoped list; use the bundled `/universities/lookups` `programs` array for the full title list (form dropdowns). Create/delete are admin-only.
 - [ ] College detail page: `GET /colleges/{id}`, render all fields including the new profile metadata (`excerpt`, `contact_*`, `website`, `cover_image`, `gallery_images`, `institution_type`, `campus_setting`, `founded_year`, `campus_size`, `is_popular`, `is_featured`). Hide the claim banner when `has_representative` is `true`.
 - [ ] Admin "create university" form: 
   - Use cached lookups to populate multi-selects

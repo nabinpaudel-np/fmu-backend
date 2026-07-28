@@ -78,6 +78,20 @@ CREATE TABLE public.majors (
 
 
 --
+-- Name: programs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.programs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    title character varying(255) NOT NULL,
+    description text NOT NULL,
+    degree_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
 -- Name: refresh_tokens; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -445,6 +459,13 @@ ALTER TABLE ONLY public.users
 
 
 --
+-- Name: idx_programs_degree_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_programs_degree_id ON public.programs USING btree (degree_id);
+
+
+--
 -- Name: idx_refresh_tokens_token; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -519,6 +540,14 @@ CREATE INDEX idx_users_email ON public.users USING btree (email);
 --
 
 CREATE INDEX idx_users_oauth_provider ON public.users USING btree (oauth_provider);
+
+
+--
+-- Name: programs programs_degree_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.programs
+    ADD CONSTRAINT programs_degree_id_fkey FOREIGN KEY (degree_id) REFERENCES public.degree_levels(id) ON DELETE RESTRICT;
 
 
 --

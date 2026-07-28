@@ -1,6 +1,10 @@
 package university
 
-import "time"
+import (
+	"time"
+
+	"fmu-backend/internal/programs"
+)
 
 type MajorResponse struct {
 	ID   string `json:"id" example:"125479fb-fccb-43cc-980a-84e1d73117b3"`
@@ -156,6 +160,7 @@ type AllLookupsResponse struct {
 	SpecialAffiliations []SpecialAffiliationResponse `json:"special_affiliations"`
 	Athletics           []AthleticResponse           `json:"athletics"`
 	SupportServices     []SupportServiceResponse     `json:"support_services"`
+	Programs            []programs.ProgramLookupItem `json:"programs"`
 }
 
 type UniversityListItem struct {

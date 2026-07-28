@@ -13,6 +13,7 @@ import (
 	"fmu-backend/internal/auth"
 	"fmu-backend/internal/errs"
 	"fmu-backend/internal/pagination"
+	"fmu-backend/internal/programs"
 	"fmu-backend/internal/response"
 	"fmu-backend/internal/validator"
 )
@@ -24,15 +25,23 @@ type favoritesLookup interface {
 	FavoritedUniversityIDs(ctx context.Context, userID string, ids []string) (map[string]struct{}, error)
 }
 
+// programsLookup is the minimal programs dependency the /lookups handler
+// needs to bundle the programs list. programs.ProgramService satisfies it.
+type programsLookup interface {
+	ListAll(ctx context.Context) ([]programs.ProgramLookupItem, error)
+}
+
 type UniversityHandler struct {
 	universityService UniversityService
 	favorites         favoritesLookup
+	programs          programsLookup
 }
 
-func NewUniversityHandler(universityService UniversityService, favs favoritesLookup) *UniversityHandler {
+func NewUniversityHandler(universityService UniversityService, favs favoritesLookup, progs programsLookup) *UniversityHandler {
 	return &UniversityHandler{
 		universityService: universityService,
 		favorites:         favs,
+		programs:          progs,
 	}
 }
 
@@ -355,6 +364,11 @@ func (h *UniversityHandler) GetAllLookups(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "something went wrong")
 		return
+	}
+	// Bundle programs alongside the other reference lists. Best-effort: if
+	// the lookup fails the rest still serves, just without programs.
+	if progs, err := h.programs.ListAll(r.Context()); err == nil {
+		lookups.Programs = progs
 	}
 	response.Success(w, http.StatusOK, lookups)
 }

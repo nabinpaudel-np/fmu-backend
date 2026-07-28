@@ -23,6 +23,7 @@ import (
 	"fmu-backend/internal/favorites"
 	"fmu-backend/internal/mail"
 	"fmu-backend/internal/oauth"
+	"fmu-backend/internal/programs"
 	"fmu-backend/internal/supabase"
 	"fmu-backend/internal/token"
 	"fmu-backend/internal/university"
@@ -74,9 +75,13 @@ func main() {
 
 	favoritesRepo := favorites.NewRepository(queries, pool)
 
+	programsRepo := programs.NewProgramRepository(queries, pool)
+	programsSvc := programs.NewProgramService(programsRepo)
+	programsHandler := programs.NewProgramHandler(programsSvc)
+
 	universityRepo := university.NewUniversityRepository(queries, pool)
 	universitySvc := university.NewUniversityService(universityRepo)
-	universityHandler := university.NewUniversityHandler(universitySvc, favoritesRepo)
+	universityHandler := university.NewUniversityHandler(universitySvc, favoritesRepo, programsSvc)
 
 	collegeRepo := college.NewCollegeRepository(queries, pool)
 	collegeSvc := college.NewCollegeService(collegeRepo)
@@ -173,6 +178,7 @@ func main() {
 	favorites.RegisterRoutes(r, favoritesHandler, authMW, studentMW)
 	claim.RegisterRoutes(r, claimHandler, authMW, adminMW, optionalAuthMW)
 	counselling.RegisterRoutes(r, counsellingHandler, authMW, adminMW, adminOrRepMW)
+	programs.RegisterRoutes(r, programsHandler, authMW, adminMW)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,

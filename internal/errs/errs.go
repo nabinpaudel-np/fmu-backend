@@ -29,6 +29,7 @@ var (
 	ErrClaimRoleNotAllowed                = errors.New("only non-student, non-admin users may submit a claim")
 	ErrRepOutOfScope                      = errors.New("representative can only edit their own university")
 	ErrRepCannotChangeNameOrSlug          = errors.New("representatives cannot change name or slug")
+	ErrProgramDegreeNotFound              = errors.New("degree does not exist")
 )
 
 // InvalidReferencesError is returned when one or more UUIDs in a request
