@@ -11,13 +11,17 @@ INSERT INTO universities (
     contact_email, contact_phone, website,
     zipcode, tuition_min, tuition_max, avg_high_school_gpa,
     founded_year, campus_size, gallery_images,
-    is_popular, is_featured
+    is_popular, is_featured,
+    maps_url, full_address, employment_rate, research_output, housing_type,
+    seo_title, seo_description,
+    status
 )
 VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
     $11, $12, $13, $14, $15, $16, $17, $18, $19,
     $20, $21, $22, $23, $24, $25, $26, $27, $28,
-    $29, $30, $31, $32, $33, $34, $35, $36, $37
+    $29, $30, $31, $32, $33, $34, $35, $36, $37,
+    $38, $39, $40, $41, $42, $43, $44, $45
 )
 RETURNING *;
 
@@ -73,13 +77,13 @@ ON CONFLICT (university_id, support_service_id) DO NOTHING;
 SELECT id, name FROM majors ORDER BY name;
 
 -- name: ListUniversities :many
-SELECT * FROM universities ORDER BY name LIMIT $1 OFFSET $2;
+SELECT id, name, slug, overview, excerpt, country, state, city, full_location, cover_image, logo, institution_type, campus_setting, in_state_tuition, out_of_state_tuition, international_tuition, need_based_aid, merit_scholarships, work_study, no_application_fee, acceptance_rate, testing_policy, sat_range, act_range, on_campus_housing, freshmen_required_on_campus, contact_email, contact_phone, website, zipcode, tuition_min, tuition_max, avg_high_school_gpa, founded_year, campus_size, gallery_images, is_popular, is_featured, maps_url, full_address, employment_rate, research_output, housing_type, seo_title, seo_description, status, published_at, created_at, updated_at FROM universities ORDER BY name LIMIT $1 OFFSET $2;
 
 -- name: CountUniversities :one
 SELECT COUNT(*) FROM universities;
 
 -- name: GetUniversityByID :one
-SELECT * FROM universities WHERE id = $1;
+SELECT id, name, slug, overview, excerpt, country, state, city, full_location, cover_image, logo, institution_type, campus_setting, in_state_tuition, out_of_state_tuition, international_tuition, need_based_aid, merit_scholarships, work_study, no_application_fee, acceptance_rate, testing_policy, sat_range, act_range, on_campus_housing, freshmen_required_on_campus, contact_email, contact_phone, website, zipcode, tuition_min, tuition_max, avg_high_school_gpa, founded_year, campus_size, gallery_images, is_popular, is_featured, maps_url, full_address, employment_rate, research_output, housing_type, seo_title, seo_description, status, published_at, created_at, updated_at FROM universities WHERE id = $1;
 
 -- name: DeleteUniversityDegreeLevels :exec
 DELETE FROM university_degree_levels WHERE university_id = $1;
@@ -172,11 +176,12 @@ SELECT
     COALESCE(full_location, '') AS full_location,
     COALESCE(logo, '') AS logo
 FROM universities
-WHERE similarity(name, $1) > 0.2
+WHERE status = 'published'
+  AND (similarity(name, $1) > 0.2
    OR similarity(full_location, $1) > 0.2
    OR similarity(city, $1) > 0.2
    OR similarity(state, $1) > 0.2
-   OR similarity(country, $1) > 0.2
+   OR similarity(country, $1) > 0.2)
 ORDER BY GREATEST(
     similarity(name, $1),
     similarity(full_location, $1),
@@ -189,3 +194,11 @@ SELECT u.id
 FROM universities u
 JOIN users usr ON usr.representative_university_id = u.id
 WHERE u.id = ANY($1::uuid[]);
+
+-- name: PublishUniversity :one
+UPDATE universities
+SET status = 'published',
+    published_at = NOW(),
+    updated_at = NOW()
+WHERE id = $1
+RETURNING id, name, slug, overview, excerpt, country, state, city, full_location, cover_image, logo, institution_type, campus_setting, in_state_tuition, out_of_state_tuition, international_tuition, need_based_aid, merit_scholarships, work_study, no_application_fee, acceptance_rate, testing_policy, sat_range, act_range, on_campus_housing, freshmen_required_on_campus, contact_email, contact_phone, website, zipcode, tuition_min, tuition_max, avg_high_school_gpa, founded_year, campus_size, gallery_images, is_popular, is_featured, maps_url, full_address, employment_rate, research_output, housing_type, seo_title, seo_description, status, published_at, created_at, updated_at;
