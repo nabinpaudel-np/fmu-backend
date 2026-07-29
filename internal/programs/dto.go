@@ -1,18 +1,30 @@
 package programs
 
 type CreateProgramRequest struct {
-	Title       string `json:"title"       validate:"required,min=1,max=255"`
-	Description string `json:"description" validate:"required"`
-	DegreeID    string `json:"degree_id"   validate:"required,uuid"`
+	Title         string `json:"title"          validate:"required,min=1,max=255"`
+	Description   string `json:"description"    validate:"required"`
+	Excerpt       string `json:"excerpt"        validate:"required"`
+	CareerOptions string `json:"career_options" validate:"required"`
+	DegreeID      string `json:"degree_id"      validate:"required,uuid"`
+}
+
+type UpdateProgramRequest struct {
+	Title         string `json:"title"          validate:"required,min=1,max=255"`
+	Description   string `json:"description"    validate:"required"`
+	Excerpt       string `json:"excerpt"        validate:"required"`
+	CareerOptions string `json:"career_options" validate:"required"`
+	DegreeID      string `json:"degree_id"      validate:"required,uuid"`
 }
 
 type ProgramResponse struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	DegreeID    string `json:"degree_id"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ID            string  `json:"id"`
+	Title         string  `json:"title"`
+	Description   string  `json:"description"`
+	Excerpt       *string `json:"excerpt"`
+	CareerOptions *string `json:"career_options"`
+	DegreeID      string  `json:"degree_id"`
+	CreatedAt     string  `json:"created_at"`
+	UpdatedAt     string  `json:"updated_at"`
 }
 
 // ProgramLookupItem is the slim shape used in the bundled /lookups endpoint so

@@ -59,6 +59,36 @@ func (h *ProgramHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	response.Success(w, http.StatusOK, res)
 }
 
+func (h *ProgramHandler) Update(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	var req UpdateProgramRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := validator.Validate.Struct(&req); err != nil {
+		fields := validator.GetValidationErrors(err)
+		response.ValidationError(w, http.StatusBadRequest, fields)
+		return
+	}
+
+	res, err := h.svc.Update(r.Context(), id, &req)
+	if err != nil {
+		if errors.Is(err, errs.ErrNotFound) {
+			response.Error(w, http.StatusNotFound, "program not found")
+			return
+		}
+		if errors.Is(err, errs.ErrProgramDegreeNotFound) {
+			response.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+	response.Success(w, http.StatusOK, res)
+}
+
 func (h *ProgramHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if err := h.svc.Delete(r.Context(), id); err != nil {
@@ -85,4 +115,16 @@ func (h *ProgramHandler) List(w http.ResponseWriter, r *http.Request) {
 		Items: items,
 		Meta:  q.BuildMeta(total),
 	})
+}
+
+// ListAll returns every program (full payload, unsorted by date) for the
+// admin program management UI and other places that want the whole catalog
+// without pagination.
+func (h *ProgramHandler) ListAll(w http.ResponseWriter, r *http.Request) {
+	items, err := h.svc.ListAllFull(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+	response.Success(w, http.StatusOK, items)
 }

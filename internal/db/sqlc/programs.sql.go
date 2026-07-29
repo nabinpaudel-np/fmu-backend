@@ -32,19 +32,27 @@ func (q *Queries) CountProgramsByDegree(ctx context.Context, degreeID string) (i
 }
 
 const createProgram = `-- name: CreateProgram :one
-INSERT INTO programs (title, description, degree_id)
-VALUES ($1, $2, $3)
-RETURNING id, title, description, degree_id, created_at, updated_at
+INSERT INTO programs (title, description, excerpt, career_options, degree_id)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, title, description, degree_id, created_at, updated_at, excerpt, career_options
 `
 
 type CreateProgramParams struct {
-	Title       string
-	Description string
-	DegreeID    string
+	Title         string
+	Description   string
+	Excerpt       *string
+	CareerOptions *string
+	DegreeID      string
 }
 
 func (q *Queries) CreateProgram(ctx context.Context, arg CreateProgramParams) (Program, error) {
-	row := q.db.QueryRow(ctx, createProgram, arg.Title, arg.Description, arg.DegreeID)
+	row := q.db.QueryRow(ctx, createProgram,
+		arg.Title,
+		arg.Description,
+		arg.Excerpt,
+		arg.CareerOptions,
+		arg.DegreeID,
+	)
 	var i Program
 	err := row.Scan(
 		&i.ID,
@@ -53,6 +61,8 @@ func (q *Queries) CreateProgram(ctx context.Context, arg CreateProgramParams) (P
 		&i.DegreeID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Excerpt,
+		&i.CareerOptions,
 	)
 	return i, err
 }
@@ -70,7 +80,7 @@ func (q *Queries) DeleteProgram(ctx context.Context, id string) (int64, error) {
 }
 
 const getProgramByID = `-- name: GetProgramByID :one
-SELECT id, title, description, degree_id, created_at, updated_at
+SELECT id, title, description, degree_id, created_at, updated_at, excerpt, career_options
 FROM programs
 WHERE id = $1
 `
@@ -85,12 +95,14 @@ func (q *Queries) GetProgramByID(ctx context.Context, id string) (Program, error
 		&i.DegreeID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Excerpt,
+		&i.CareerOptions,
 	)
 	return i, err
 }
 
 const listAllPrograms = `-- name: ListAllPrograms :many
-SELECT id, title, description, degree_id, created_at, updated_at
+SELECT id, title, description, degree_id, created_at, updated_at, excerpt, career_options
 FROM programs
 ORDER BY title
 `
@@ -111,6 +123,8 @@ func (q *Queries) ListAllPrograms(ctx context.Context) ([]Program, error) {
 			&i.DegreeID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Excerpt,
+			&i.CareerOptions,
 		); err != nil {
 			return nil, err
 		}
@@ -123,7 +137,7 @@ func (q *Queries) ListAllPrograms(ctx context.Context) ([]Program, error) {
 }
 
 const listPrograms = `-- name: ListPrograms :many
-SELECT id, title, description, degree_id, created_at, updated_at
+SELECT id, title, description, degree_id, created_at, updated_at, excerpt, career_options
 FROM programs
 ORDER BY title
 LIMIT $1 OFFSET $2
@@ -150,6 +164,8 @@ func (q *Queries) ListPrograms(ctx context.Context, arg ListProgramsParams) ([]P
 			&i.DegreeID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Excerpt,
+			&i.CareerOptions,
 		); err != nil {
 			return nil, err
 		}
@@ -162,7 +178,7 @@ func (q *Queries) ListPrograms(ctx context.Context, arg ListProgramsParams) ([]P
 }
 
 const listProgramsByDegree = `-- name: ListProgramsByDegree :many
-SELECT id, title, description, degree_id, created_at, updated_at
+SELECT id, title, description, degree_id, created_at, updated_at, excerpt, career_options
 FROM programs
 WHERE degree_id = $1
 ORDER BY title
@@ -191,6 +207,8 @@ func (q *Queries) ListProgramsByDegree(ctx context.Context, arg ListProgramsByDe
 			&i.DegreeID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Excerpt,
+			&i.CareerOptions,
 		); err != nil {
 			return nil, err
 		}
@@ -200,4 +218,48 @@ func (q *Queries) ListProgramsByDegree(ctx context.Context, arg ListProgramsByDe
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateProgram = `-- name: UpdateProgram :one
+UPDATE programs
+SET title = $2,
+    description = $3,
+    excerpt = $4,
+    career_options = $5,
+    degree_id = $6,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING id, title, description, degree_id, created_at, updated_at, excerpt, career_options
+`
+
+type UpdateProgramParams struct {
+	ID            string
+	Title         string
+	Description   string
+	Excerpt       *string
+	CareerOptions *string
+	DegreeID      string
+}
+
+func (q *Queries) UpdateProgram(ctx context.Context, arg UpdateProgramParams) (Program, error) {
+	row := q.db.QueryRow(ctx, updateProgram,
+		arg.ID,
+		arg.Title,
+		arg.Description,
+		arg.Excerpt,
+		arg.CareerOptions,
+		arg.DegreeID,
+	)
+	var i Program
+	err := row.Scan(
+		&i.ID,
+		&i.Title,
+		&i.Description,
+		&i.DegreeID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Excerpt,
+		&i.CareerOptions,
+	)
+	return i, err
 }

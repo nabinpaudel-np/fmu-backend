@@ -24,6 +24,7 @@ func (f Filter) Empty() bool { return f.DegreeID == "" }
 type ProgramRepository interface {
 	Create(ctx context.Context, params sqlc.CreateProgramParams) (sqlc.Program, error)
 	GetByID(ctx context.Context, id string) (sqlc.Program, error)
+	Update(ctx context.Context, params sqlc.UpdateProgramParams) (sqlc.Program, error)
 	Delete(ctx context.Context, id string) error
 	List(ctx context.Context, q pagination.Query, f Filter) ([]sqlc.Program, int64, error)
 	// ListAll returns every program sorted by title — used by the /lookups
@@ -61,6 +62,24 @@ func (r *programRepository) GetByID(ctx context.Context, id string) (sqlc.Progra
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "22P02" {
 			return sqlc.Program{}, errs.ErrNotFound
+		}
+		return sqlc.Program{}, err
+	}
+	return row, nil
+}
+
+func (r *programRepository) Update(ctx context.Context, params sqlc.UpdateProgramParams) (sqlc.Program, error) {
+	row, err := r.queries.UpdateProgram(ctx, params)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return sqlc.Program{}, errs.ErrNotFound
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "22P02" {
+			return sqlc.Program{}, errs.ErrNotFound
+		}
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			return sqlc.Program{}, fmt.Errorf("%w (degree_id=%s)", errs.ErrProgramDegreeNotFound, params.DegreeID)
 		}
 		return sqlc.Program{}, err
 	}
