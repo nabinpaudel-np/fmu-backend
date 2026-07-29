@@ -174,7 +174,7 @@ func main() {
 	auth.RegisterRoutes(r, authHandler, authMW)
 	university.RegisterRoutes(r, universityHandler, authMW, adminMW, optionalAuthMW)
 	uploads.RegisterRoutes(r, uploadsHandler, authMW, adminOrRepMW)
-	college.RegisterRoutes(r, collegeHandler, authMW, adminOrRepMW, optionalAuthMW)
+	college.RegisterRoutes(r, collegeHandler, authMW, adminMW, adminOrRepMW, optionalAuthMW)
 	favorites.RegisterRoutes(r, favoritesHandler, authMW, studentMW)
 	claim.RegisterRoutes(r, claimHandler, authMW, adminMW, optionalAuthMW)
 	counselling.RegisterRoutes(r, counsellingHandler, authMW, adminMW, adminOrRepMW)
