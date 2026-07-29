@@ -32,6 +32,7 @@ type UniversityRepository interface {
 	Search(ctx context.Context, q string) ([]sqlc.SearchUniversitiesRow, error)
 	RepresentedIDs(ctx context.Context, ids []string) (map[string]struct{}, error)
 	Stats(ctx context.Context) (*UniversityStats, error)
+	Publish(ctx context.Context, id string) (sqlc.University, error)
 	GetUniversityDegreeLevels(ctx context.Context, universityID string) ([]sqlc.DegreeLevel, error)
 	GetUniversityMajors(ctx context.Context, universityID string) ([]sqlc.Major, error)
 	GetUniversityStudyFormats(ctx context.Context, universityID string) ([]sqlc.StudyFormat, error)
@@ -187,7 +188,7 @@ func (r *universityRepository) Get(ctx context.Context, q pagination.Query, f Fi
 	// Columns spelled out: schema.sql order ≠ runtime table order, so
 	// SELECT * doesn't match the sqlc struct scan order.
 	listSQL := fmt.Sprintf(
-		"SELECT id, name, slug, overview, excerpt, country, state, city, full_location, cover_image, logo, institution_type, campus_setting, in_state_tuition, out_of_state_tuition, international_tuition, need_based_aid, merit_scholarships, work_study, no_application_fee, acceptance_rate, testing_policy, sat_range, act_range, on_campus_housing, freshmen_required_on_campus, contact_email, contact_phone, website, zipcode, tuition_min, tuition_max, avg_high_school_gpa, founded_year, campus_size, gallery_images, is_popular, is_featured, created_at, updated_at FROM universities u WHERE 1=1%s ORDER BY u.name LIMIT $%d OFFSET $%d",
+		"SELECT id, name, slug, overview, excerpt, country, state, city, full_location, cover_image, logo, institution_type, campus_setting, in_state_tuition, out_of_state_tuition, international_tuition, need_based_aid, merit_scholarships, work_study, no_application_fee, acceptance_rate, testing_policy, sat_range, act_range, on_campus_housing, freshmen_required_on_campus, contact_email, contact_phone, website, zipcode, tuition_min, tuition_max, avg_high_school_gpa, founded_year, campus_size, gallery_images, is_popular, is_featured, maps_url, full_address, employment_rate, research_output, housing_type, seo_title, seo_description, status, published_at, created_at, updated_at FROM universities u WHERE 1=1%s ORDER BY u.name LIMIT $%d OFFSET $%d",
 		where, len(listArgs)-1, len(listArgs),
 	)
 
@@ -221,6 +222,9 @@ func collectUniversities(rows pgx.Rows) ([]sqlc.University, error) {
 			&u.Zipcode, &u.TuitionMin, &u.TuitionMax, &u.AvgHighSchoolGpa,
 			&u.FoundedYear, &u.CampusSize, &u.GalleryImages,
 			&u.IsPopular, &u.IsFeatured,
+			&u.MapsUrl, &u.FullAddress, &u.EmploymentRate, &u.ResearchOutput, &u.HousingType,
+			&u.SeoTitle, &u.SeoDescription,
+			&u.Status, &u.PublishedAt,
 			&u.CreatedAt, &u.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -233,15 +237,33 @@ func collectUniversities(rows pgx.Rows) ([]sqlc.University, error) {
 // buildUniversitiesWhere returns a parameterized WHERE fragment (with a
 // leading " AND ") and the matching args. Empty Filters produces empty output.
 func buildUniversitiesWhere(f Filters) (string, []any) {
-	var clauses []string
+	var orClauses []string
+	var andClauses []string
 	var args []any
+
+	// Status is always AND-ed (it scopes the whole query). The rest of the
+	// filters are OR-ed because they come from optional multi-select facets:
+	// "find unis matching any of these criteria". The handler validates that
+	// non-admin callers can only pass "published".
+	if f.Status != "" {
+		args = append(args, f.Status)
+		andClauses = append(andClauses, fmt.Sprintf("u.status = $%d", len(args)))
+	}
+	if v := f.IsPopular; v != nil {
+		args = append(args, *v)
+		andClauses = append(andClauses, fmt.Sprintf("u.is_popular = $%d", len(args)))
+	}
+	if v := f.IsFeatured; v != nil {
+		args = append(args, *v)
+		andClauses = append(andClauses, fmt.Sprintf("u.is_featured = $%d", len(args)))
+	}
 
 	eq := func(format, val string) {
 		if val == "" {
 			return
 		}
 		args = append(args, val)
-		clauses = append(clauses, fmt.Sprintf(format, len(args)))
+		orClauses = append(orClauses, fmt.Sprintf(format, len(args)))
 	}
 
 	// EXISTS subquery per filter — single index hit beats a join per row.
@@ -250,7 +272,7 @@ func buildUniversitiesWhere(f Filters) (string, []any) {
 			return
 		}
 		args = append(args, values)
-		clauses = append(clauses, fmt.Sprintf(
+		orClauses = append(orClauses, fmt.Sprintf(
 			"EXISTS (SELECT 1 FROM %s ul JOIN %s l ON l.id = ul.%s WHERE ul.university_id = u.id AND l.name = ANY($%d::text[]))",
 			joinTable, lookupTable, idColumn, len(args),
 		))
@@ -264,41 +286,41 @@ func buildUniversitiesWhere(f Filters) (string, []any) {
 
 	if len(f.CampusSettings) > 0 {
 		args = append(args, f.CampusSettings)
-		clauses = append(clauses, fmt.Sprintf("u.campus_setting = ANY($%d::text[])", len(args)))
+		orClauses = append(orClauses, fmt.Sprintf("u.campus_setting = ANY($%d::text[])", len(args)))
 	}
 
 	if f.TuitionMin != nil {
 		args = append(args, *f.TuitionMin)
-		clauses = append(clauses, fmt.Sprintf("u.tuition_min >= $%d", len(args)))
+		orClauses = append(orClauses, fmt.Sprintf("u.tuition_min >= $%d", len(args)))
 	}
 	if f.TuitionMax != nil {
 		args = append(args, *f.TuitionMax)
-		clauses = append(clauses, fmt.Sprintf("u.tuition_max <= $%d", len(args)))
+		orClauses = append(orClauses, fmt.Sprintf("u.tuition_max <= $%d", len(args)))
 	}
 	if f.AcceptanceMin != nil {
 		args = append(args, *f.AcceptanceMin)
-		clauses = append(clauses, fmt.Sprintf("u.acceptance_rate >= $%d", len(args)))
+		orClauses = append(orClauses, fmt.Sprintf("u.acceptance_rate >= $%d", len(args)))
 	}
 	if f.AcceptanceMax != nil {
 		args = append(args, *f.AcceptanceMax)
-		clauses = append(clauses, fmt.Sprintf("u.acceptance_rate <= $%d", len(args)))
+		orClauses = append(orClauses, fmt.Sprintf("u.acceptance_rate <= $%d", len(args)))
 	}
 
 	if v := f.NeedBasedAid; v != nil {
 		args = append(args, *v)
-		clauses = append(clauses, fmt.Sprintf("u.need_based_aid = $%d", len(args)))
+		orClauses = append(orClauses, fmt.Sprintf("u.need_based_aid = $%d", len(args)))
 	}
 	if v := f.MeritScholarships; v != nil {
 		args = append(args, *v)
-		clauses = append(clauses, fmt.Sprintf("u.merit_scholarships = $%d", len(args)))
+		orClauses = append(orClauses, fmt.Sprintf("u.merit_scholarships = $%d", len(args)))
 	}
 	if v := f.NoApplicationFee; v != nil {
 		args = append(args, *v)
-		clauses = append(clauses, fmt.Sprintf("u.no_application_fee = $%d", len(args)))
+		orClauses = append(orClauses, fmt.Sprintf("u.no_application_fee = $%d", len(args)))
 	}
 	if v := f.OnCampusHousing; v != nil {
 		args = append(args, *v)
-		clauses = append(clauses, fmt.Sprintf("u.on_campus_housing = $%d", len(args)))
+		orClauses = append(orClauses, fmt.Sprintf("u.on_campus_housing = $%d", len(args)))
 	}
 
 	addExists("university_majors", "majors", "major_id", f.Majors)
@@ -313,16 +335,20 @@ func buildUniversitiesWhere(f Filters) (string, []any) {
 	// here, so multi-select services also OR (any-of).
 	for _, name := range sortedSupportServiceNames(f.HasSupportService) {
 		args = append(args, name)
-		clauses = append(clauses, fmt.Sprintf(
+		orClauses = append(orClauses, fmt.Sprintf(
 			"EXISTS (SELECT 1 FROM university_support_services uss JOIN support_services ss ON ss.id = uss.support_service_id WHERE uss.university_id = u.id AND ss.name = $%d)",
 			len(args),
 		))
 	}
 
-	if len(clauses) == 0 {
+	parts := append([]string{}, andClauses...)
+	if len(orClauses) > 0 {
+		parts = append(parts, "("+strings.Join(orClauses, " OR ")+")")
+	}
+	if len(parts) == 0 {
 		return "", nil
 	}
-	return " AND (" + strings.Join(clauses, " OR ") + ")", args
+	return " AND " + strings.Join(parts, " AND "), args
 }
 
 // Sorted: identical Filters must produce identical param order so
@@ -517,13 +543,34 @@ func (r *universityRepository) Patch(ctx context.Context, id string, req *PatchU
 	if req.IsFeatured != nil {
 		addSet("is_featured", *req.IsFeatured)
 	}
+	if req.MapsUrl != nil {
+		addSet("maps_url", *req.MapsUrl)
+	}
+	if req.FullAddress != nil {
+		addSet("full_address", *req.FullAddress)
+	}
+	if req.EmploymentRate != nil {
+		addSet("employment_rate", nullableNumeric(*req.EmploymentRate))
+	}
+	if req.ResearchOutput != nil {
+		addSet("research_output", *req.ResearchOutput)
+	}
+	if req.HousingType != nil {
+		addSet("housing_type", *req.HousingType)
+	}
+	if req.SeoTitle != nil {
+		addSet("seo_title", *req.SeoTitle)
+	}
+	if req.SeoDescription != nil {
+		addSet("seo_description", *req.SeoDescription)
+	}
 
 	sets = append(sets, "updated_at = now()")
 	args = append(args, id)
 	// RETURNING lists columns in scan order, not SELECT *. The ALTER TABLE ADD
 	// COLUMN migration appended fields after created_at/updated_at, so the
 	// physical column order no longer matches the schema.sql declaration.
-	sql := fmt.Sprintf("UPDATE universities SET %s WHERE id = $%d RETURNING id, name, slug, overview, excerpt, country, state, city, full_location, cover_image, logo, institution_type, campus_setting, in_state_tuition, out_of_state_tuition, international_tuition, need_based_aid, merit_scholarships, work_study, no_application_fee, acceptance_rate, testing_policy, sat_range, act_range, on_campus_housing, freshmen_required_on_campus, contact_email, contact_phone, website, zipcode, tuition_min, tuition_max, avg_high_school_gpa, founded_year, campus_size, gallery_images, is_popular, is_featured, created_at, updated_at",
+	sql := fmt.Sprintf("UPDATE universities SET %s WHERE id = $%d RETURNING id, name, slug, overview, excerpt, country, state, city, full_location, cover_image, logo, institution_type, campus_setting, in_state_tuition, out_of_state_tuition, international_tuition, need_based_aid, merit_scholarships, work_study, no_application_fee, acceptance_rate, testing_policy, sat_range, act_range, on_campus_housing, freshmen_required_on_campus, contact_email, contact_phone, website, zipcode, tuition_min, tuition_max, avg_high_school_gpa, founded_year, campus_size, gallery_images, is_popular, is_featured, maps_url, full_address, employment_rate, research_output, housing_type, seo_title, seo_description, status, published_at, created_at, updated_at",
 		strings.Join(sets, ", "), len(args))
 
 	var row sqlc.University
@@ -540,6 +587,9 @@ func (r *universityRepository) Patch(ctx context.Context, id string, req *PatchU
 		&row.Zipcode, &row.TuitionMin, &row.TuitionMax, &row.AvgHighSchoolGpa,
 		&row.FoundedYear, &row.CampusSize, &row.GalleryImages,
 		&row.IsPopular, &row.IsFeatured,
+		&row.MapsUrl, &row.FullAddress, &row.EmploymentRate, &row.ResearchOutput, &row.HousingType,
+		&row.SeoTitle, &row.SeoDescription,
+		&row.Status, &row.PublishedAt,
 		&row.CreatedAt, &row.UpdatedAt,
 	)
 	if err != nil {
@@ -650,6 +700,7 @@ func (r *universityRepository) Stats(ctx context.Context) (*UniversityStats, err
 			COUNT(*) FILTER (WHERE is_featured)::bigint AS total_featured,
 			COUNT(*) FILTER (WHERE is_popular)::bigint AS total_popular
 		FROM universities
+		WHERE status = 'published'
 	`
 	var s UniversityStats
 	if err := r.pool.QueryRow(ctx, query).Scan(
@@ -661,6 +712,21 @@ func (r *universityRepository) Stats(ctx context.Context) (*UniversityStats, err
 		return nil, fmt.Errorf("stats: %w", err)
 	}
 	return &s, nil
+}
+
+func (r *universityRepository) Publish(ctx context.Context, id string) (sqlc.University, error) {
+	row, err := r.queries.PublishUniversity(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return sqlc.University{}, errs.ErrNotFound
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "22P02" {
+			return sqlc.University{}, errs.ErrNotFound
+		}
+		return sqlc.University{}, err
+	}
+	return row, nil
 }
 
 func (r *universityRepository) GetUniversityDegreeLevels(ctx context.Context, universityID string) ([]sqlc.DegreeLevel, error) {
