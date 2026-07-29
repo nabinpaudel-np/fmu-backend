@@ -39,6 +39,12 @@ type College struct {
 	GalleryImages   []string
 	IsPopular       bool
 	IsFeatured      bool
+	FullAddress     *string
+	MapsUrl         *string
+	SeoTitle        *string
+	SeoDescription  *string
+	Status          string
+	PublishedAt     pgtype.Timestamptz
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }
@@ -59,10 +65,25 @@ type CollegeClaim struct {
 	UpdatedAt     time.Time
 }
 
+type CollegeDegreeLevel struct {
+	CollegeID     string
+	DegreeLevelID string
+}
+
 type CollegeFavorite struct {
 	UserID    string
 	CollegeID string
 	CreatedAt time.Time
+}
+
+type CollegeMajor struct {
+	CollegeID string
+	MajorID   string
+}
+
+type CollegeStudyFormat struct {
+	CollegeID     string
+	StudyFormatID string
 }
 
 type CounsellingInquiry struct {
@@ -96,6 +117,17 @@ type DegreeLevel struct {
 type Major struct {
 	ID   string
 	Name string
+}
+
+type Program struct {
+	ID            string
+	Title         string
+	Description   string
+	DegreeID      string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	Excerpt       *string
+	CareerOptions *string
 }
 
 type RefreshToken struct {
@@ -166,6 +198,15 @@ type University struct {
 	GalleryImages            []string
 	IsPopular                bool
 	IsFeatured               bool
+	MapsUrl                  *string
+	FullAddress              *string
+	EmploymentRate           pgtype.Numeric
+	ResearchOutput           *string
+	HousingType              *string
+	SeoTitle                 *string
+	SeoDescription           *string
+	Status                   string
+	PublishedAt              pgtype.Timestamptz
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
 }

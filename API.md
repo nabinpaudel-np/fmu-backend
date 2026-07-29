@@ -25,8 +25,10 @@ Backend API for the FMU (Find My University) application. This document covers e
 12. [Favorites endpoints](#favorites-endpoints)
 13. [Claim endpoints](#claim-endpoints)
 14. [Lookup reference data](#lookup-reference-data)
-15. [Frontend integration checklist](#putting-it-all-together--frontend-integration-checklist)
-16. [CORS](#cors)
+15. [Program endpoints](#program-endpoints)
+16. [Drafts and publishing](#drafts-and-publishing)
+17. [Frontend integration checklist](#putting-it-all-together--frontend-integration-checklist)
+18. [CORS](#cors)
 
 ---
 
@@ -528,6 +530,7 @@ Reads are public. Creating a university is admin-only; updating allows an admin 
 | `GET /api/v1/universities/support-services`    | public |
 | `GET /api/v1/universities/lookups`             | public |
 | `POST /api/v1/universities`                    | admin                           |
+| `POST /api/v1/universities/{id}/publish`       | admin                           |
 | `PATCH /api/v1/universities/{id}`              | admin or matching university rep |
 
 ### GET `/api/v1/universities`
@@ -604,6 +607,11 @@ All filter params are optional and combine with AND across categories. Inside a 
 
 - `pace_options` — no `pace` field on universities yet.
 - `size` — DB stores free-text `campus_size` like "168 acres", not bucketed small/medium/large.
+
+**Lifecycle**
+| Param | Type | Behavior |
+|-------|------|----------|
+| `status` | enum | Filter by lifecycle stage. Values: `draft`, `published`, `archived`, `all`. Admins see everything; non-admin callers are silently restricted to `published` regardless of what they send. See [Drafts and publishing](#drafts-and-publishing). |
 
 #### Example
 
@@ -854,7 +862,7 @@ Get one university's full details, including all lookup-table references (majors
 | `degree_levels`, `majors`, `study_formats`, `special_affiliations`, `athletics`, `support_services` | `[{id, name}]` | Empty array if none |
 
 **Errors:**
-- `404` — university with that ID does not exist
+- `404` — university with that ID does not exist, or the row is a draft / archived and the caller is not an admin
   ```json
   { "success": false, "error": "university not found" }
   ```
@@ -912,18 +920,28 @@ Create a new university.
   "is_popular": true,
   "is_featured": true,
 
+  "maps_url": "https://maps.google.com/?q=MIT+Cambridge+MA",
+  "full_address": "77 Massachusetts Ave, Cambridge, MA 02139",
+  "employment_rate": 92.5,
+  "research_output": "R1",
+  "housing_type": "On-Campus",
+  "seo_title": "MIT - Top Research University",
+  "seo_description": "Learn about MIT admissions, programs, and campus life.",
+
   "degree_level_ids": ["43e1eef0-286b-4f6f-aeea-4edb72479e61"],
   "major_ids": ["7154ecda-3efe-4f2b-ae56-0b34dba16b93"],
   "study_format_ids": ["a0336dd8-1e29-4564-b675-474dac1f6517"],
   "special_affiliation_ids": [],
   "athletic_ids": ["fa19a9f6-d650-4d85-a873-514f197b07b5"],
-  "support_service_ids": ["90f07d1d-2026-44a4-b47b-6b83ca15b282"]
+  "support_service_ids": ["90f07d1d-2026-44a4-b47b-6b83ca15b282"],
+
+  "status": "published"
 }
 ```
 
 **Field validation rules:**
 
-**Required** (returns 400 if missing):
+**Required when `status` is omitted or `"published"`** (returns 400 if missing):
 - `name` (string)
 - `slug` (string, must be unique)
 - `overview` (string)
@@ -939,10 +957,14 @@ Create a new university.
 **Optional, validated if present:**
 - `cover_image`, `logo`, `gallery_images[]` — must be valid URLs. The expected workflow is to upload first via `POST /api/v1/uploads/sign` (browser → Cloudinary direct), then pass the returned `secure_url` here. See [Uploads endpoints](#uploads-endpoints) for the two-step flow.
 - `in_state_tuition`, `out_of_state_tuition`, `international_tuition`, `tuition_min`, `tuition_max` — must be ≥ 0
-- `acceptance_rate` — between 0 and 100 (percentage)
+- `acceptance_rate`, `employment_rate` — between 0 and 100 (percentage)
 - `avg_high_school_gpa` — between 0 and 5
 - `founded_year` — between 1000 and 2100
-- `excerpt` — max 500 chars
+- `excerpt`, `full_address` — max 500 chars
+- `maps_url` — must be a valid URL, max 500 chars
+- `seo_title` — max 70 chars
+- `seo_description` — max 160 chars
+- `research_output`, `housing_type` — max 50 chars (frontend constrains the value to a known label: `R1` / `R2` / `R3` / `M1` / `M2` / `Baccalaureate` / `Associate` / `Special-Focus` for research; housing types such as `On-Campus` / `Off-Campus` / `Required`)
 - `study_format_ids`, `special_affiliation_ids`, `athletic_ids`, `support_service_ids` — each item must be UUID (arrays can be empty or omitted)
 
 **Optional, no extra validation:**
@@ -950,6 +972,13 @@ Create a new university.
 
 **Booleans (always present, default false):**
 - `need_based_aid`, `merit_scholarships`, `work_study`, `no_application_fee`, `on_campus_housing`, `freshmen_required_on_campus`, `is_popular`, `is_featured`
+
+**Lifecycle**
+- `status` — `"draft"` or `"published"`. Defaults to `"published"`. Set to `"draft"` to create the row with only `name` and `slug`; the rest can be filled in via `PATCH` and the row promoted later with `POST /api/v1/universities/{id}/publish`. See [Drafts and publishing](#drafts-and-publishing).
+
+**Required when `status` is `"draft"`** (returns 400 if missing):
+- `name` (string)
+- `slug` (string, must be unique)
 
 **Response:** `201 Created` — full university record (same shape as the detail endpoint).
 
@@ -970,6 +999,39 @@ Create a new university.
   ```json
   { "success": false, "error": "university with this slug already exists (slug=mit)" }
   ```
+
+---
+
+### POST `/api/v1/universities/{id}/publish`
+
+Promote a draft university to `published`. Re-runs the create-time required-field validation against the current row and atomically flips `status` to `"published"` with `published_at = NOW()` if the row passes.
+
+**Auth:** admin only
+
+**Path params:**
+
+| Param | Type | Notes       |
+|-------|------|-------------|
+| `id`  | UUID | University's primary key |
+
+**Request body:** none.
+
+**Response:** `200 OK` — full university record (same shape as the detail endpoint), with `status: "published"` and `published_at` populated.
+
+**Errors:**
+- `400` — required fields are still empty. The response lists the missing fields:
+  ```json
+  {
+    "success": false,
+    "errors": [
+      { "field": "overview", "message": "required to publish" },
+      { "field": "country", "message": "required to publish" }
+    ]
+  }
+  ```
+- `401` — missing/invalid session cookie
+- `403` — authenticated but role is not `admin`
+- `404` — university with that ID does not exist (or id is not a valid UUID)
 
 ---
 
@@ -1067,6 +1129,13 @@ So a `[]` payload is a *destructive* delete for that category. To "leave alone",
     ],
     "is_popular": true,
     "is_featured": true,
+    "maps_url": "https://maps.google.com/?q=MIT+Cambridge+MA",
+    "full_address": "77 Massachusetts Ave, Cambridge, MA 02139",
+    "employment_rate": 92.5,
+    "research_output": "R1",
+    "housing_type": "On-Campus",
+    "seo_title": "MIT - Top Research University",
+    "seo_description": "Learn about MIT admissions, programs, and campus life.",
     "created_at": "2026-06-30T13:12:24.915082+05:45",
     "updated_at": "2026-07-07T10:00:00+05:45"
   }
@@ -1181,6 +1250,7 @@ Reads are public. Creating a college allows admins and university-scoped represe
 | `GET /api/v1/colleges/{id}`               | public                            |
 | `GET /api/v1/universities/{id}/colleges`  | public                            |
 | `POST /api/v1/colleges`                   | admin or matching university rep  |
+| `POST /api/v1/colleges/{id}/publish`      | admin                             |
 | `PATCH /api/v1/colleges/{id}`             | admin or matching college rep     |
 
 ### POST `/api/v1/colleges`
@@ -1202,8 +1272,10 @@ Create a new college under an existing parent university.
   "city": "Cambridge",
   "full_location": "Cambridge, MA, US",
   "zipcode": "02139",
+  "full_address": "77 Massachusetts Ave, Cambridge, MA 02139",
   "cover_image": "https://res.cloudinary.com/<cloud>/image/upload/v1234/fmu/development/cover/abc.jpg",
   "logo": "https://res.cloudinary.com/<cloud>/image/upload/v1234/fmu/development/logo/abc.png",
+  "maps_url": "https://maps.google.com/?q=MIT+Cambridge+MA",
   "gallery_images": [
     "https://res.cloudinary.com/<cloud>/image/upload/v1234/fmu/development/gallery/abc-1.jpg"
   ],
@@ -1215,26 +1287,46 @@ Create a new college under an existing parent university.
   "founded_year": 1932,
   "campus_size": "Cambridge campus",
   "is_popular": true,
-  "is_featured": false
+  "is_featured": false,
+  "seo_title": "MIT College of Engineering - MIT",
+  "seo_description": "Engineering education and research within MIT.",
+
+  "degree_level_ids": ["5b7e1c91-006a-407b-a9bd-609f60cefa0a"],
+  "major_ids": ["125479fb-fccb-43cc-980a-84e1d73117b3"],
+  "study_format_ids": ["55896b33-58bd-44cd-bf75-6387dd5614d4"],
+
+  "status": "published"
 }
 ```
 
-**Required, validated:**
+**Required when `status` is omitted or `"published"`:**
 - `name` — non-empty, max 255 chars
 - `slug` — non-empty, 2–255 chars. Must be unique across colleges.
 - `university_id` — must be a valid UUID of an existing `universities.id`
 - `overview` — non-empty
 
-**Optional, validated if present:**
+**Required when `status` is `"draft"`:**
+- `name` (same as above)
+- `slug` (same as above; uniqueness still enforced)
+
+**Optional when `status` is `"draft"` or `"published"`, validated if present:**
 - `excerpt` — max 500 chars
 - `country`, `state`, `city` — max 100 chars
-- `full_location` — max 255 chars; `zipcode` — max 20 chars
+- `full_location` — max 255 chars; `zipcode` — max 20 chars; `full_address` — max 500 chars
 - `cover_image`, `logo`, and every `gallery_images[]` item — valid URL. Upload images first through `POST /api/v1/uploads/sign`, then store the returned `secure_url` values. See [Uploads endpoints](#uploads-endpoints).
+- `maps_url` — valid URL, max 500 chars
 - `institution_type`, `campus_setting` — max 50 chars
 - `contact_email` — valid email, max 255 chars; `contact_phone` — max 50 chars
 - `website` — valid URL, max 500 chars
 - `founded_year` — integer from 1000 through 2100; `campus_size` — max 100 chars
 - `is_popular`, `is_featured` — booleans, default `false`
+- `seo_title` — max 70 chars (the UI derives a default of `"<College> - <Parent University>"`; the backend stores whatever it receives and does not force a value)
+- `seo_description` — max 160 chars
+
+**Optional lookup arrays (draft or published), validated if present:**
+- `degree_level_ids` — array of `degree_levels.id` UUIDs. Pulled from `GET /api/v1/universities/lookups`. At least one entry must reference an existing row, otherwise the request returns `400`. Stored in the `college_degree_levels` join table (not a comma-separated string).
+- `major_ids` — array of `majors.id` UUIDs (same shape; stored in `college_majors`).
+- `study_format_ids` — array of `study_formats.id` UUIDs (same shape; stored in `college_study_formats`).
 
 **Response:** `201 Created`
 ```json
@@ -1252,8 +1344,10 @@ Create a new college under an existing parent university.
     "city": "Cambridge",
     "full_location": "Cambridge, MA, US",
     "zipcode": "02139",
+    "full_address": "77 Massachusetts Ave, Cambridge, MA 02139",
     "cover_image": "https://res.cloudinary.com/<cloud>/image/upload/v1234/fmu/development/cover/abc.jpg",
     "logo": "https://res.cloudinary.com/<cloud>/image/upload/v1234/fmu/development/logo/abc.png",
+    "maps_url": "https://maps.google.com/?q=MIT+Cambridge+MA",
     "gallery_images": [
       "https://res.cloudinary.com/<cloud>/image/upload/v1234/fmu/development/gallery/abc-1.jpg"
     ],
@@ -1266,16 +1360,30 @@ Create a new college under an existing parent university.
     "campus_size": "Cambridge campus",
     "is_popular": true,
     "is_featured": false,
+    "seo_title": "MIT College of Engineering - MIT",
+    "seo_description": "Engineering education and research within MIT.",
     "created_at": "2026-07-06T15:00:00Z",
     "updated_at": "2026-07-06T15:00:00Z"
   }
 }
 ```
 
+> The Create response carries scalar fields only. The lookup arrays (`degree_levels`, `majors`, `study_formats`) are populated on `GET /api/v1/colleges/{id}` — call the detail endpoint right after Create to fetch them.
+
 **Errors:**
-- `400` — invalid JSON, per-field validation failure, or `university_id` does not exist:
+- `400` — invalid JSON, per-field validation failure, `university_id` does not exist:
   ```json
   { "success": false, "error": "parent university does not exist (university_id=125479fb-fccb-43cc-980a-84e1d73117b3)" }
+  ```
+- `400` — one or more lookup IDs don't exist:
+  ```json
+  {
+    "success": false,
+    "errors": [
+      { "field": "major_ids", "message": "the following majors do not exist: [abc-123]" },
+      { "field": "degree_level_ids", "message": "the following degree_levels do not exist: [def-456]" }
+    ]
+  }
   ```
 - `401` — missing/invalid session cookie
 - `403` — authenticated but not permitted: role is `student`, or a `representative` whose bound university does not match the body `university_id`:
@@ -1286,6 +1394,39 @@ Create a new college under an existing parent university.
   ```json
   { "success": false, "error": "college with this slug already exists (slug=mit-college-of-engineering)" }
   ```
+
+---
+
+### POST `/api/v1/colleges/{id}/publish`
+
+Promote a draft college to `published`. Re-runs the create-time required-field validation against the current row and atomically flips `status` to `"published"` with `published_at = NOW()` if the row passes.
+
+**Auth:** admin only
+
+**Path params:**
+
+| Param | Type | Notes       |
+|-------|------|-------------|
+| `id`  | UUID | College's primary key |
+
+**Request body:** none.
+
+**Response:** `200 OK` — full college record (same shape as the detail endpoint), with `status: "published"` and `published_at` populated.
+
+**Errors:**
+- `400` — required fields are still empty. The response lists the missing fields:
+  ```json
+  {
+    "success": false,
+    "errors": [
+      { "field": "university_id", "message": "required to publish" },
+      { "field": "overview", "message": "required to publish" }
+    ]
+  }
+  ```
+- `401` — missing/invalid session cookie
+- `403` — authenticated but role is not `admin`
+- `404` — college with that ID does not exist (or id is not a valid UUID)
 
 ---
 
@@ -1312,6 +1453,7 @@ All filter params are optional and combine with AND.
 | `country`        | string | Exact match (case-sensitive)                                        |
 | `state_province` | string | Exact match on `state` (case-sensitive)                             |
 | `city`           | string | Exact match on `city` (case-sensitive)                              |
+| `status`         | enum   | Filter by lifecycle stage. Values: `draft`, `published`, `archived`, `all`. Admins see everything; non-admin callers are silently restricted to `published`. See [Drafts and publishing](#drafts-and-publishing). |
 
 Unknown or empty values narrow to nothing.
 
@@ -1486,6 +1628,22 @@ Get one college's full details.
     "campus_size": "Cambridge campus",
     "is_popular": true,
     "is_featured": false,
+    "full_address": "77 Massachusetts Ave, Cambridge, MA 02139",
+    "maps_url": "https://maps.google.com/?q=MIT",
+    "seo_title": "MIT College of Engineering - MIT",
+    "seo_description": "Engineering education and research at MIT.",
+    "degree_levels": [
+      { "id": "1f4a2c20-7b8d-4e1a-9b2c-1a4d3e9b8c40", "name": "Bachelor" },
+      { "id": "9b8e1d12-3a4f-4c7b-8e9d-2c1a4b3e5f60", "name": "Master" }
+    ],
+    "majors": [
+      { "id": "5c8a2e90-1d3b-4f7a-8c2e-9b4d1a3e6f80", "name": "Computer Science" },
+      { "id": "2d7f1b40-4a8c-4e9b-83d1-7c2a5b9e3f10", "name": "Mechanical Engineering" }
+    ],
+    "study_formats": [
+      { "id": "6e1b3a50-8c2d-4f8a-9e1b-4d3c7a2e5f90", "name": "On-campus" },
+      { "id": "3a8c2d60-1e4b-4a9c-8d2e-5f1b7c4a9e20", "name": "Hybrid" }
+    ],
     "has_representative": true,
     "created_at": "2026-07-06T15:00:00Z",
     "updated_at": "2026-07-06T15:00:00Z"
@@ -1508,11 +1666,18 @@ Get one college's full details.
 | `founded_year`    | number           | `0` if not set                              |
 | `campus_size`     | string           | Empty string if not set                     |
 | `is_popular`, `is_featured` | bool  | Always present, default `false`              |
+| `full_address`    | string           | Empty string if not set                     |
+| `maps_url`        | string (URL)      | Empty string if not set                     |
+| `seo_title`       | string           | Empty string if not set; UI defaults to `"<College> - <Parent University>"` if blank |
+| `seo_description` | string           | Empty string if not set                     |
+| `degree_levels`   | array of `{id, name}` | Populated from the `degree_levels` lookup; empty array if none |
+| `majors`          | array of `{id, name}` | Populated from the `majors` lookup; empty array if none        |
+| `study_formats`   | array of `{id, name}` | Populated from the `study_formats` lookup; empty array if none |
 | `has_representative` | bool         | `true` when a representative is bound; use to hide the claim banner |
 | `created_at`, `updated_at` | string (RFC3339) | Always present                    |
 
 **Errors:**
-- `404` — college with that ID does not exist
+- `404` — college with that ID does not exist, or the row is a draft / archived and the caller is not an admin:
   ```json
   { "success": false, "error": "college not found" }
   ```
@@ -1561,15 +1726,24 @@ Partially update a college. Fetch the current record with `GET /api/v1/colleges/
 | `founded_year` | integer | 1000–2100 |
 | `campus_size` | string | max 100 chars |
 | `is_popular`, `is_featured` | boolean | no additional validation |
+| `full_address` | string | max 500 chars |
+| `maps_url` | string | valid URL, max 500 chars |
+| `seo_title` | string | max 70 chars |
+| `seo_description` | string | max 160 chars |
+| `degree_level_ids` | UUID[] | every item must be a valid UUID; submission replaces the whole set (delete-then-insert); empty array clears the association |
+| `major_ids` | UUID[] | every item must be a valid UUID; submission replaces the whole set (delete-then-insert); empty array clears the association |
+| `study_format_ids` | UUID[] | every item must be a valid UUID; submission replaces the whole set (delete-then-insert); empty array clears the association |
 
 Partial-update rules:
 
 - Omitted field → unchanged.
 - JSON `null` → unchanged.
 - Empty string for an optional location or logo field → stores an empty string, which clears it from the frontend's perspective.
+- For the three lookup arrays (`degree_level_ids`, `major_ids`, `study_format_ids`): **omitted** leaves the existing associations in place; **empty array `[]`** deletes every existing association. Both are valid — pick whichever matches the UI intent.
 - `{}` is valid and returns the current record without changing it.
 - `university_id` is not accepted by this endpoint; a college cannot be moved to a different parent university.
 - Admins may send `name` and `slug`. College representatives must omit both fields, even when sending the current unchanged value.
+- Sending an ID that doesn't exist in the lookup table returns `400` with `{field: "<field>_ids", message: "the following <resource> do not exist: [<id>...]"}`. The whole PATCH is rejected; no partial writes occur.
 
 **Example:**
 
@@ -2012,7 +2186,7 @@ curl -b cookies.txt 'http://localhost:3000/api/v1/admin/claims?type=college&stat
 | Param | Required | Values / behavior |
 |-------|----------|-------------------|
 | `type` | no | `university` or `college`; omit to include both tables |
-| `status` | no | `pending`, `approved`, or `rejected`; omit for every status |
+| `status` | no | `pending`, `approved`, `rejected`, or `all`; omit or pass `all` for every status |
 | `page` | no | default `1` |
 | `page_size` | no | default `20`, max `100` |
 
@@ -2496,7 +2670,7 @@ Same request/response shapes as the admin counterparts; same auth role gating (`
 
 ## Lookup reference data
 
-These endpoints return reference data the frontend can cache locally (it rarely changes). Each single-list endpoint returns `{ items: [{ id, name }] }`. The bundled `/lookups` endpoint returns all six lists in one object.
+These endpoints return reference data the frontend can cache locally (it rarely changes). Each single-list endpoint returns `{ items: [{ id, name }] }`. The bundled `/lookups` endpoint returns all seven lists in one object.
 
 | Endpoint                                       | Returns               |
 |------------------------------------------------|-----------------------|
@@ -2506,7 +2680,7 @@ These endpoints return reference data the frontend can cache locally (it rarely 
 | `GET /api/v1/universities/special-affiliations`| All affiliations      |
 | `GET /api/v1/universities/athletics`           | All athletic divisions|
 | `GET /api/v1/universities/support-services`    | All support services  |
-| `GET /api/v1/universities/lookups`             | All six lists, bundled |
+| `GET /api/v1/universities/lookups`             | All seven lists, bundled |
 
 **All auth:** public
 
@@ -2540,12 +2714,235 @@ curl http://localhost:3000/api/v1/universities/lookups
     "study_formats": [ { "id": "...", "name": "Hybrid / Blended" } ],
     "special_affiliations": [ { "id": "...", "name": "HBCU" } ],
     "athletics": [ { "id": "...", "name": "NCAA Division I" } ],
-    "support_services": [ { "id": "...", "name": "International Student Center" } ]
+    "support_services": [ { "id": "...", "name": "International Student Center" } ],
+    "programs": [ { "id": "...", "title": "BSc Computer Science", "degree_id": "..." } ]
   }
 }
 ```
 
 **Recommended frontend caching strategy:** fetch `/lookups` once on app load, store in a JS map keyed by ID. The detail endpoint already includes the resolved `name` for every lookup, so the cache is mainly useful when building forms (create university admin UI).
+
+---
+
+## Program endpoints
+
+Programs are catalog content the admin curates. Each program is bound to one existing degree level (FK to `degree_levels`). Reads are public; writes are admin-only.
+
+| Endpoint                       | Auth  |
+|--------------------------------|-------|
+| `GET /api/v1/programs`         | public |
+| `GET /api/v1/programs/all`     | public |
+| `GET /api/v1/programs/{id}`    | public |
+| `POST /api/v1/programs`        | admin |
+| `PUT /api/v1/programs/{id}`    | admin |
+| `DELETE /api/v1/programs/{id}` | admin |
+
+### GET `/api/v1/programs`
+
+List programs with pagination. Filter by `degree_id` to return only programs under one degree.
+
+**Auth:** public
+
+#### Pagination
+
+| Param       | Type | Default | Notes                              |
+|-------------|------|---------|------------------------------------|
+| `page`      | int  | `1`     | 1-indexed                          |
+| `page_size` | int  | `20`    | Max 100 (silently capped)          |
+
+#### Filters
+
+| Param        | Type | Notes                                  |
+|--------------|------|----------------------------------------|
+| `degree_id`  | uuid | Restrict to programs under one degree  |
+
+**Example:**
+```bash
+curl 'http://localhost:3000/api/v1/programs?degree_id=5b7e1c91-006a-407b-a9bd-609f60cefa0a&page=1&page_size=20'
+```
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "a8b9...-c0d1",
+        "title": "BSc Computer Science",
+        "description": "Four-year undergraduate program covering...",
+        "excerpt": "Algorithms, systems, and software engineering fundamentals.",
+        "career_options": "Software engineer · Data scientist · ML engineer",
+        "degree_id": "5b7e1c91-006a-407b-a9bd-609f60cefa0a",
+        "created_at": "2026-07-27T10:00:00Z",
+        "updated_at": "2026-07-27T10:00:00Z"
+      }
+    ],
+    "meta": { "page": 1, "page_size": 20, "total": 1, "total_pages": 1 }
+  }
+}
+```
+
+#### Fields
+
+| Field            | Type   | Notes                                                       |
+|------------------|--------|-------------------------------------------------------------|
+| `id`             | uuid   | Server-assigned                                             |
+| `title`          | string | 1–255 chars, unique                                         |
+| `description`    | text   | Full program description (long-form)                        |
+| `excerpt`        | text   | Short summary blurb — same shape as `description`, trimmed  |
+| `career_options` | text   | Free-form career paths list; same shape as `description`    |
+| `degree_id`      | uuid   | FK → `degree_levels.id`                                     |
+| `created_at`     | ts     | RFC 3339 UTC                                                |
+| `updated_at`     | ts     | RFC 3339 UTC                                                |
+
+### GET `/api/v1/programs/all`
+
+Return every program with the full payload (no pagination, no filters). Use this for the admin program management list; for paginated reads prefer `GET /api/v1/programs`.
+
+**Auth:** public
+
+```bash
+curl http://localhost:3000/api/v1/programs/all
+```
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "a8b9...-c0d1",
+      "title": "BSc Computer Science",
+      "description": "Four-year undergraduate program covering...",
+      "excerpt": "Algorithms, systems, and software engineering fundamentals.",
+      "career_options": "Software engineer · Data scientist · ML engineer",
+      "degree_id": "5b7e1c91-006a-407b-a9bd-609f60cefa0a",
+      "created_at": "2026-07-27T10:00:00Z",
+      "updated_at": "2026-07-27T10:00:00Z"
+    }
+  ]
+}
+```
+
+### GET `/api/v1/programs/{id}`
+
+Fetch a single program by id.
+
+**Auth:** public
+
+```bash
+curl http://localhost:3000/api/v1/programs/a8b9...-c0d1
+```
+
+### POST `/api/v1/programs`
+
+Create a program. `degree_id` must reference an existing `degree_levels` row.
+
+**Auth:** admin
+
+```bash
+curl -X POST http://localhost:3000/api/v1/programs \
+  -H 'Authorization: Bearer <admin-access-token>' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "title": "BSc Computer Science",
+    "description": "Four-year undergraduate program covering...",
+    "excerpt": "Algorithms, systems, and software engineering fundamentals.",
+    "career_options": "Software engineer · Data scientist · ML engineer",
+    "degree_id": "5b7e1c91-006a-407b-a9bd-609f60cefa0a"
+  }'
+```
+
+**Validation errors:**
+
+| Field            | Rules                |
+|------------------|----------------------|
+| `title`          | required, 1–255 chars|
+| `description`    | required             |
+| `excerpt`        | required             |
+| `career_options` | required             |
+| `degree_id`      | required, valid UUID |
+
+A missing or unknown `degree_id` returns `400 { "error": "degree does not exist (degree_id=...)" }`.
+
+A duplicate `title` returns `409` from the unique constraint (FK collision).
+
+### PUT `/api/v1/programs/{id}`
+
+Replace a program's content. The full body is required (same shape as `POST`); partial updates are not supported on this endpoint. `updated_at` is bumped server-side.
+
+**Auth:** admin
+
+```bash
+curl -X PUT http://localhost:3000/api/v1/programs/a8b9...-c0d1 \
+  -H 'Authorization: Bearer <admin-access-token>' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "title": "BSc Computer Science",
+    "description": "Updated description...",
+    "excerpt": "Updated excerpt.",
+    "career_options": "Software engineer · ML engineer",
+    "degree_id": "5b7e1c91-006a-407b-a9bd-609f60cefa0a"
+  }'
+```
+
+Returns `200` with the updated record, `400` on validation / unknown `degree_id`, `404` if the id does not exist.
+
+### DELETE `/api/v1/programs/{id}`
+
+Delete a program. A `degree_levels` row that still has programs cannot be deleted (FK `ON DELETE RESTRICT`); remove its programs first.
+
+**Auth:** admin
+
+```bash
+curl -X DELETE http://localhost:3000/api/v1/programs/a8b9...-c0d1 \
+  -H 'Authorization: Bearer <admin-access-token>'
+```
+
+Returns `204 No Content` on success, `404` if the id does not exist.
+
+---
+
+## Drafts and publishing
+
+Universities and colleges both have a three-state lifecycle: `draft`, `published`, and `archived`. Drafts exist so admins (and representatives creating colleges under their own university) can save a row with only `name` + `slug` and finish filling out the rest later.
+
+**Creating a draft**
+
+Set `status: "draft"` in the `POST` body. Only `name` and `slug` are required — every other field becomes optional. The row is saved with `status = "draft"` and a `NULL` `published_at`. The slug still has to be unique across the table (database-enforced).
+
+```bash
+curl -X POST http://localhost:3000/api/v1/universities \
+  -H 'Authorization: Bearer <admin-access-token>' \
+  -H 'Content-Type: application/json' \
+  -d '{"name": "Draft University", "slug": "draft-u", "status": "draft"}'
+# → 201 Created, status="draft"
+```
+
+The same shape works for colleges. A university-scoped representative can create a draft college under their bound university; admins can create a draft under any university.
+
+**Filling in a draft**
+
+`PATCH /api/v1/universities/{id}` (or `/colleges/{id}`) with the missing fields. The body is the same field set as the create endpoint, with every field optional. The default `status` filter on the list endpoint is `published`, so drafts won't appear in public responses — they're surfaced only through the admin views.
+
+**Publishing**
+
+`POST /api/v1/universities/{id}/publish` (or `/colleges/{id}/publish`) re-runs the required-field validation against the current row and atomically flips `status` to `"published"` and `published_at` to `NOW()`. If anything is still missing, the response is `400` with the list of field names:
+
+```bash
+curl -X POST http://localhost:3000/api/v1/universities/<id>/publish \
+  -H 'Authorization: Bearer <admin-access-token>'
+# → 400 { "errors": [{ "field": "overview", "message": "required to publish" }, ...] }
+```
+
+Publish is admin-only — representatives cannot promote drafts. Use `PATCH` to fill the missing fields, then re-issue the publish request.
+
+**Visibility**
+
+- Public list / search / get-by-id endpoints return only `status = "published"` rows. Draft and archived rows return `404` from `GET /api/v1/universities/{id}` and `GET /api/v1/colleges/{id}` for non-admin callers.
+- Admins can opt in to draft / archived views via `?status=draft|published|archived|all` on `GET /api/v1/universities` and `GET /api/v1/colleges`. A non-admin caller passing `?status=draft` is silently narrowed to `published` (forgiving public behaviour, no `403`).
+- Search endpoints hard-filter to `status = "published"` — public search never returns drafts.
+
+**Archived**
+
+`status = "archived"` is reserved for rows that have been retired from public view. The list and detail endpoints filter archived rows out for non-admin callers the same way drafts are filtered. The archive transition is not exposed via the public API; rows are flipped through operator SQL or future endpoints.
 
 ---
 
@@ -2560,14 +2957,17 @@ curl http://localhost:3000/api/v1/universities/lookups
 - [ ] University detail page — affiliated colleges list: `GET /universities/{id}/colleges` (or `GET /colleges?university_id={id}` with filters). Each college row carries `has_representative` for the same banner logic.
 - [ ] College list page: `GET /colleges?page=N&page_size=20&<filters>` (`university_id`, `country`, `state_province`, `city`). Use `has_representative` on each row to hide the claim banner.
 - [ ] College search box: `GET /colleges/search?q=<term>` — debounced; one search box covers college name, college location, and parent university name/slug. Results embed the parent university and `is_favorited`/`has_representative`, so a single render call is enough.
-- [ ] College detail page: `GET /colleges/{id}`, render all fields including the new profile metadata (`excerpt`, `contact_*`, `website`, `cover_image`, `gallery_images`, `institution_type`, `campus_setting`, `founded_year`, `campus_size`, `is_popular`, `is_featured`). Hide the claim banner when `has_representative` is `true`.
+- [ ] Program listing/filtering: `GET /programs?degree_id=<uuid>` for a degree-scoped paginated list; `GET /programs/all` for the full unfiltered catalog (admin management UI). Each row exposes `title`, `description`, `excerpt`, `career_options`, and `degree_id`. Create/update/delete are admin-only.
+- [ ] College detail page: `GET /colleges/{id}`, render all fields including the new profile metadata (`excerpt`, `contact_*`, `website`, `cover_image`, `gallery_images`, `institution_type`, `campus_setting`, `founded_year`, `campus_size`, `is_popular`, `is_featured`, `full_address`, `maps_url`, `seo_title`, `seo_description`) and the three lookup arrays (`degree_levels`, `majors`, `study_formats`). Hide the claim banner when `has_representative` is `true`.
 - [ ] Admin "create university" form: 
   - Use cached lookups to populate multi-selects
   - On submit: `POST /universities` with the assembled payload
   - On 400: show the `errors[]` list inline next to each field
   - On 201: redirect to the new detail page
-- [ ] Admin "create college" form: `POST /colleges` with `university_id` selected from the universities list
-- [ ] Admin promotion: not a frontend concern; backend operator runs the SQL
+- [ ] Admin "create college" form: `POST /colleges` with `university_id` selected from the universities list. Source `degree_levels`, `majors`, and `study_formats` as multi-selects from the cached `/universities/lookups` (send the `_ids` arrays in the request body — not the names). Send `full_address`, `maps_url`, `seo_title`, `seo_description` from the Contact & Location and Settings tabs. After a 201, call `GET /colleges/{id}` to fetch the populated lookup arrays.
+- [ ] Admin "save as draft" form: send `status: "draft"` in the `POST` body. Only `name` + `slug` are required; return a 201 with the id so the user can come back and PATCH the rest later.
+- [ ] Admin "publish" action: `POST /universities/{id}/publish` or `POST /colleges/{id}/publish`. On 400, surface the `errors[]` list inline so the user can fill the missing fields and retry. See [Drafts and publishing](#drafts-and-publishing).
+- [ ] Admin "drafts queue" view: `GET /universities?status=draft` (or `?status=all`) — admins only; non-admin callers see their filter silently narrowed to `published`.
 - [ ] "Become a representative" claim form (public):
   - Determine whether the user is claiming a university or college and retain that target's ID
   - Upload the verification PDF or image first: `POST /uploads/document?purpose=document` (multipart, ≤ 20 MiB, PDF/JPEG/PNG/WebP/GIF; no auth required)

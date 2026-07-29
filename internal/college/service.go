@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"fmu-backend/internal/auth"
+	"fmu-backend/internal/db/sqlc"
 	"fmu-backend/internal/errs"
 	"fmu-backend/internal/pagination"
 )
@@ -21,6 +22,7 @@ type CollegeService interface {
 	ListByUniversity(ctx context.Context, universityID string, q pagination.Query) ([]CollegeListItem, int64, error)
 	Search(ctx context.Context, q string) ([]CollegeSearchResult, error)
 	RepresentedIDs(ctx context.Context, ids []string) (map[string]struct{}, error)
+	Publish(ctx context.Context, id string) (*CreateCollegeResponse, error)
 }
 
 type collegeService struct {
@@ -41,12 +43,88 @@ func (s *collegeService) Create(ctx context.Context, req *CreateCollegeRequest) 
 		}
 	}
 
-	row, err := s.repo.Create(ctx, toCreateCollegeParams(req))
+	// Drafts only require name + slug. The CreateCollegeRequest struct has
+	// `validate:"required"` on overview/university_id; for drafts those can
+	// be left blank and the publish endpoint re-validates before flipping
+	// status to "published".
+	if req.Status == "draft" {
+		if err := validateDraftCollege(req); err != nil {
+			return nil, err
+		}
+	}
+
+	row, err := s.repo.Create(ctx, toCreateCollegeParams(req), lookupIDs{
+		DegreeLevelIDs: req.DegreeLevelIDs,
+		MajorIDs:       req.MajorIDs,
+		StudyFormatIDs: req.StudyFormatIDs,
+	})
 	if err != nil {
 		log.Default().Printf("failed to create college: %v", err)
 		return nil, err
 	}
 	return toCreateCollegeResponse(row), nil
+}
+
+func validateDraftCollege(req *CreateCollegeRequest) error {
+	var missing []string
+	if req.Name == "" {
+		missing = append(missing, "name")
+	}
+	if req.Slug == "" {
+		missing = append(missing, "slug")
+	}
+	if len(missing) > 0 {
+		return &errs.PublishValidationError{Fields: missing}
+	}
+	return nil
+}
+
+func (s *collegeService) Publish(ctx context.Context, id string) (*CreateCollegeResponse, error) {
+	row, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, errs.ErrNotFound) {
+			return nil, errs.ErrNotFound
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "22P02" {
+			return nil, errs.ErrNotFound
+		}
+		log.Default().Printf("get college %s for publish: %v", id, err)
+		return nil, err
+	}
+	if missing := requiredFieldsForCollegePublish(row); len(missing) > 0 {
+		return nil, &errs.PublishValidationError{Fields: missing}
+	}
+	published, err := s.repo.Publish(ctx, id)
+	if err != nil {
+		if errors.Is(err, errs.ErrNotFound) {
+			return nil, errs.ErrNotFound
+		}
+		log.Default().Printf("publish college %s: %v", id, err)
+		return nil, err
+	}
+	return toCreateCollegeResponse(published), nil
+}
+
+// requiredFieldsForCollegePublish mirrors the `validate:"required"` tags on
+// CreateCollegeRequest. Publish requires the row to be presentable to the
+// public, so university_id + overview (the two DTO-required fields besides
+// name/slug) must be filled.
+func requiredFieldsForCollegePublish(c sqlc.College) []string {
+	var missing []string
+	if c.Name == "" {
+		missing = append(missing, "name")
+	}
+	if c.Slug == "" {
+		missing = append(missing, "slug")
+	}
+	if c.UniversityID == "" {
+		missing = append(missing, "university_id")
+	}
+	if c.Overview == "" {
+		missing = append(missing, "overview")
+	}
+	return missing
 }
 
 func (s *collegeService) List(ctx context.Context, q pagination.Query, f Filters) ([]CollegeListItem, int64, error) {
@@ -75,7 +153,21 @@ func (s *collegeService) GetByID(ctx context.Context, id string) (*CollegeDetail
 		log.Default().Printf("failed to get college %s: %v", id, err)
 		return nil, err
 	}
-	return toCollegeDetailResponse(row), nil
+
+	degreeLevels, err := s.repo.GetCollegeDegreeLevels(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	majors, err := s.repo.GetCollegeMajors(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	studyFormats, err := s.repo.GetCollegeStudyFormats(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	return toCollegeDetailResponse(row, degreeLevels, majors, studyFormats), nil
 }
 
 func (s *collegeService) Update(ctx context.Context, id string, req *UpdateCollegeRequest) (*CreateCollegeResponse, error) {

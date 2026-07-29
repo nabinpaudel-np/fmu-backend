@@ -16,6 +16,7 @@ func RegisterRoutes(
 	optionalAuthMW func(http.Handler) http.Handler,
 ) {
 	r.With(authMW, adminMW).Post("/api/v1/universities", h.Create)
+	r.With(authMW, adminMW).Post("/api/v1/universities/{id}/publish", h.Publish)
 	// PATCH is allowed for admins OR the representative assigned to that
 	// specific university. RequireUniversityEditor enforces both checks.
 	r.With(authMW, auth.RequireUniversityEditor("id")).Patch("/api/v1/universities/{id}", h.Patch)
@@ -31,5 +32,5 @@ func RegisterRoutes(
 	r.Get("/api/v1/universities/lookups", h.GetAllLookups)
 
 	r.With(optionalAuthMW).Get("/api/v1/universities", h.Get)
-	r.Get("/api/v1/universities/{id}", h.GetByID)
+	r.With(optionalAuthMW).Get("/api/v1/universities/{id}", h.GetByID)
 }

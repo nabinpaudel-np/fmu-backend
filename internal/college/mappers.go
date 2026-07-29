@@ -3,6 +3,8 @@ package college
 import (
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"fmu-backend/internal/db/sqlc"
 )
 
@@ -30,7 +32,19 @@ func toCreateCollegeParams(req *CreateCollegeRequest) sqlc.CreateCollegeParams {
 		GalleryImages:   req.GalleryImages,
 		IsPopular:       req.IsPopular,
 		IsFeatured:      req.IsFeatured,
+		FullAddress:     stringPtrOrNil(req.FullAddress),
+		MapsUrl:         stringPtrOrNil(req.MapsUrl),
+		SeoTitle:        stringPtrOrNil(req.SeoTitle),
+		SeoDescription:  stringPtrOrNil(req.SeoDescription),
+		Status:          statusOrDefault(req.Status),
 	}
+}
+
+func statusOrDefault(s string) string {
+	if s == "" {
+		return "published"
+	}
+	return s
 }
 
 func toCreateCollegeResponse(c sqlc.College) *CreateCollegeResponse {
@@ -46,8 +60,10 @@ func toCreateCollegeResponse(c sqlc.College) *CreateCollegeResponse {
 		City:            deref(c.City),
 		FullLocation:    deref(c.FullLocation),
 		Zipcode:         deref(c.Zipcode),
+		FullAddress:     deref(c.FullAddress),
 		CoverImage:      deref(c.CoverImage),
 		Logo:            deref(c.Logo),
+		MapsUrl:         deref(c.MapsUrl),
 		GalleryImages:   c.GalleryImages,
 		InstitutionType: deref(c.InstitutionType),
 		CampusSetting:   deref(c.CampusSetting),
@@ -58,15 +74,48 @@ func toCreateCollegeResponse(c sqlc.College) *CreateCollegeResponse {
 		CampusSize:      deref(c.CampusSize),
 		IsPopular:       c.IsPopular,
 		IsFeatured:      c.IsFeatured,
+		SeoTitle:        deref(c.SeoTitle),
+		SeoDescription:  deref(c.SeoDescription),
+		Status:          c.Status,
+		PublishedAt:     publishedAtPtr(c.PublishedAt),
 		CreatedAt:       c.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:       c.UpdatedAt.UTC().Format(time.RFC3339),
 	}
 }
 
-func toCollegeDetailResponse(c sqlc.College) *CollegeDetailResponse {
+func publishedAtPtr(t pgtype.Timestamptz) *time.Time {
+	if !t.Valid {
+		return nil
+	}
+	return &t.Time
+}
+
+func toCollegeDetailResponse(
+	c sqlc.College,
+	degreeLevels []sqlc.DegreeLevel,
+	majors []sqlc.Major,
+	studyFormats []sqlc.StudyFormat,
+) *CollegeDetailResponse {
 	return &CollegeDetailResponse{
 		CreateCollegeResponse: *toCreateCollegeResponse(c),
+		DegreeLevels: toLookupItems[sqlc.DegreeLevel, CollegeDegreeLevelResponse](degreeLevels, func(d sqlc.DegreeLevel) CollegeDegreeLevelResponse {
+			return CollegeDegreeLevelResponse{ID: d.ID, Name: d.Name}
+		}),
+		Majors: toLookupItems[sqlc.Major, CollegeMajorResponse](majors, func(m sqlc.Major) CollegeMajorResponse {
+			return CollegeMajorResponse{ID: m.ID, Name: m.Name}
+		}),
+		StudyFormats: toLookupItems[sqlc.StudyFormat, CollegeStudyFormatResponse](studyFormats, func(s sqlc.StudyFormat) CollegeStudyFormatResponse {
+			return CollegeStudyFormatResponse{ID: s.ID, Name: s.Name}
+		}),
 	}
+}
+
+func toLookupItems[In any, Out any](items []In, convert func(In) Out) []Out {
+	out := make([]Out, len(items))
+	for i, item := range items {
+		out[i] = convert(item)
+	}
+	return out
 }
 
 func toCollegeListItem(c sqlc.College) CollegeListItem {

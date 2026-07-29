@@ -33,6 +33,16 @@ type Filters struct {
 	NoApplicationFee  *bool
 	OnCampusHousing   *bool
 
+	// Status is the lifecycle filter: "draft", "published", "archived",
+	// or "all". Empty string is interpreted by the handler (defaults to
+	// "published" for non-admin callers).
+	Status string
+	// IsPopular / IsFeatured: ?is_popular=true and ?is_featured=true narrow
+	// to rows with that flag set to true. Omit the param (or pass other
+	// values) to leave it unfiltered.
+	IsPopular  *bool
+	IsFeatured *bool
+
 	HasSupportService map[string]bool
 }
 
@@ -53,6 +63,9 @@ func (f Filters) Empty() bool {
 		f.NoApplicationFee != nil || f.OnCampusHousing != nil {
 		return false
 	}
+	if f.IsPopular != nil || f.IsFeatured != nil {
+		return false
+	}
 	return len(f.HasSupportService) == 0
 }
 
@@ -70,6 +83,7 @@ func ParseFilters(q url.Values) Filters {
 	f.Country = q.Get("country")
 	f.State = q.Get("state_province")
 	f.City = q.Get("city")
+	f.Status = normalizeStatus(q.Get("status"))
 	f.TuitionMin = parseIntPtr(q.Get("tuitionMin"))
 	f.TuitionMax = parseIntPtr(q.Get("tuitionMax"))
 	f.AcceptanceMin = parseFloatPtr(q.Get("acceptanceMin"))
@@ -78,6 +92,8 @@ func ParseFilters(q url.Values) Filters {
 	f.MeritScholarships = parseBoolPtr(q.Get("offers_merit_scholarships"))
 	f.NoApplicationFee = parseBoolPtr(q.Get("no_application_fee"))
 	f.OnCampusHousing = parseBoolPtr(q.Get("on_campus_housing"))
+	f.IsPopular = parseBoolPtr(q.Get("is_popular"))
+	f.IsFeatured = parseBoolPtr(q.Get("is_featured"))
 
 	// Support services: each ?has_X=true becomes a constraint that the school
 	// has that service. Multiple has_* AND together.
@@ -155,6 +171,16 @@ func parseBoolPtr(s string) *bool {
 	default:
 		return nil
 	}
+}
+
+// normalizeStatus maps "all" to "" so the SQL builder's `if f.Status != ""`
+// check treats it as "no filter". Empty input stays empty (admin callers
+// without ?status= want every row, which the handler already understands).
+func normalizeStatus(s string) string {
+	if s == "all" {
+		return ""
+	}
+	return s
 }
 
 // Slug → DB-name maps. Keep these in sync with

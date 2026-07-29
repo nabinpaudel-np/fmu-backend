@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"fmu-backend/internal/auth"
+	"fmu-backend/internal/db/sqlc"
 	"fmu-backend/internal/errs"
 	"fmu-backend/internal/pagination"
 )
@@ -21,6 +22,7 @@ type UniversityService interface {
 	Search(ctx context.Context, q string) ([]UniversitySearchResult, error)
 	RepresentedIDs(ctx context.Context, ids []string) (map[string]struct{}, error)
 	Stats(ctx context.Context) (*StatsResponse, error)
+	Publish(ctx context.Context, id string) (*CreateUniversityResponse, error)
 	GetMajors(ctx context.Context) ([]MajorResponse, error)
 	GetDegreeLevels(ctx context.Context) ([]DegreeLevelResponse, error)
 	GetStudyFormats(ctx context.Context) ([]StudyFormatResponse, error)
@@ -41,6 +43,15 @@ func NewUniversityService(repo UniversityRepository) UniversityService {
 }
 
 func (s *universityService) Create(ctx context.Context, req *CreateUniversityRequest) (*CreateUniversityResponse, error) {
+	// When saving as a draft, only `name` and `slug` are required. The
+	// CreateUniversityRequest struct has `validate:"required"` on many other
+	// fields, so we run a second, narrower validation pass here for drafts.
+	if req.Status == "draft" {
+		if err := validateDraftUniversity(req); err != nil {
+			return nil, err
+		}
+	}
+
 	row, err := s.repo.Create(ctx, toCreateUniversityParams(req), lookupIDs{
 		DegreeLevelIDs:        req.DegreeLevelIDs,
 		MajorIDs:              req.MajorIDs,
@@ -55,6 +66,95 @@ func (s *universityService) Create(ctx context.Context, req *CreateUniversityReq
 	}
 
 	return toCreateUniversityResponse(row), nil
+}
+
+// validateDraftUniversity rejects drafts that are missing the only two
+// fields a draft must carry (name and slug). All other fields may be left
+// blank; the publish endpoint re-validates the full required-field set
+// before flipping status to "published".
+func validateDraftUniversity(req *CreateUniversityRequest) error {
+	var missing []string
+	if req.Name == "" {
+		missing = append(missing, "name")
+	}
+	if req.Slug == "" {
+		missing = append(missing, "slug")
+	}
+	if len(missing) > 0 {
+		return &errs.PublishValidationError{Fields: missing}
+	}
+	return nil
+}
+
+func (s *universityService) Publish(ctx context.Context, id string) (*CreateUniversityResponse, error) {
+	row, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, errs.ErrNotFound) {
+			return nil, errs.ErrNotFound
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "22P02" {
+			return nil, errs.ErrNotFound
+		}
+		log.Default().Printf("get university %s for publish: %v", id, err)
+		return nil, err
+	}
+	if missing := requiredFieldsForPublish(row); len(missing) > 0 {
+		return nil, &errs.PublishValidationError{Fields: missing}
+	}
+	published, err := s.repo.Publish(ctx, id)
+	if err != nil {
+		if errors.Is(err, errs.ErrNotFound) {
+			return nil, errs.ErrNotFound
+		}
+		log.Default().Printf("publish university %s: %v", id, err)
+		return nil, err
+	}
+	return toCreateUniversityResponse(published), nil
+}
+
+// requiredFieldsForPublish mirrors the `validate:"required"` tags on
+// CreateUniversityRequest. Mirroring (not reusing the validator) keeps the
+// publish check robust against future DTO tweaks that drop a required tag —
+// the publish check stays tied to "this row must be presentable to the
+// public".
+func requiredFieldsForPublish(u sqlc.University) []string {
+	var missing []string
+	if u.Name == "" {
+		missing = append(missing, "name")
+	}
+	if u.Slug == "" {
+		missing = append(missing, "slug")
+	}
+	if deref(u.Overview) == "" {
+		missing = append(missing, "overview")
+	}
+	if deref(u.Country) == "" {
+		missing = append(missing, "country")
+	}
+	if deref(u.City) == "" {
+		missing = append(missing, "city")
+	}
+	if deref(u.InstitutionType) == "" {
+		missing = append(missing, "institution_type")
+	}
+	if deref(u.CampusSetting) == "" {
+		missing = append(missing, "campus_setting")
+	}
+	if deref(u.ContactEmail) == "" {
+		missing = append(missing, "contact_email")
+	}
+	if deref(u.Website) == "" {
+		missing = append(missing, "website")
+	}
+	return missing
+}
+
+func deref(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 func (s *universityService) Patch(ctx context.Context, id string, req *PatchUniversityRequest) (*CreateUniversityResponse, error) {

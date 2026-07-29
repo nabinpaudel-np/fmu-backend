@@ -78,6 +78,22 @@ CREATE TABLE public.majors (
 
 
 --
+-- Name: programs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.programs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    title character varying(255) NOT NULL,
+    description text NOT NULL,
+    degree_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    excerpt text,
+    career_options text
+);
+
+
+--
 -- Name: refresh_tokens; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -174,6 +190,15 @@ CREATE TABLE public.universities (
     gallery_images text[],
     is_popular boolean DEFAULT false NOT NULL,
     is_featured boolean DEFAULT false NOT NULL,
+    maps_url character varying(500),
+    full_address character varying(500),
+    employment_rate numeric(5,2),
+    research_output character varying(50),
+    housing_type character varying(50),
+    seo_title character varying(70),
+    seo_description character varying(160),
+    status VARCHAR(20) DEFAULT 'published' NOT NULL,
+    published_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -381,6 +406,14 @@ ALTER TABLE ONLY public.universities
 
 
 --
+-- Name: universities universities_status_check; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.universities
+    ADD CONSTRAINT universities_status_check CHECK (((status)::text = ANY ((ARRAY['draft'::character varying, 'published'::character varying, 'archived'::character varying])::text[])));
+
+
+--
 -- Name: university_athletics university_athletics_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -442,6 +475,13 @@ ALTER TABLE ONLY public.users
 
 ALTER TABLE ONLY public.users
     ADD CONSTRAINT users_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: idx_programs_degree_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_programs_degree_id ON public.programs USING btree (degree_id);
 
 
 --
@@ -508,6 +548,13 @@ CREATE UNIQUE INDEX idx_universities_slug ON public.universities USING btree (sl
 
 
 --
+-- Name: idx_universities_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_universities_status ON public.universities USING btree (status);
+
+
+--
 -- Name: idx_users_email; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -519,6 +566,22 @@ CREATE INDEX idx_users_email ON public.users USING btree (email);
 --
 
 CREATE INDEX idx_users_oauth_provider ON public.users USING btree (oauth_provider);
+
+
+--
+-- Name: programs programs_degree_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.programs
+    ADD CONSTRAINT programs_degree_id_fkey FOREIGN KEY (degree_id) REFERENCES public.degree_levels(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: programs programs_title_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.programs
+    ADD CONSTRAINT programs_title_key UNIQUE (title);
 
 
 --
@@ -681,6 +744,12 @@ CREATE TABLE public.colleges (
     gallery_images text[],
     is_popular boolean DEFAULT false NOT NULL,
     is_featured boolean DEFAULT false NOT NULL,
+    full_address character varying(500),
+    maps_url character varying(500),
+    seo_title character varying(70),
+    seo_description character varying(160),
+    status VARCHAR(20) DEFAULT 'published' NOT NULL,
+    published_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -703,6 +772,14 @@ ALTER TABLE ONLY public.colleges
 
 
 --
+-- Name: colleges colleges_status_check; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.colleges
+    ADD CONSTRAINT colleges_status_check CHECK (((status)::text = ANY ((ARRAY['draft'::character varying, 'published'::character varying, 'archived'::character varying])::text[])));
+
+
+--
 -- Name: colleges colleges_university_id_fkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -722,6 +799,115 @@ CREATE INDEX idx_colleges_university_id ON public.colleges USING btree (universi
 --
 
 CREATE INDEX idx_colleges_name_trgm ON public.colleges USING gin (name gin_trgm_ops);
+
+
+--
+-- Name: idx_colleges_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_colleges_status ON public.colleges USING btree (status);
+
+
+--
+-- Name: college_degree_levels; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.college_degree_levels (
+    college_id uuid NOT NULL,
+    degree_level_id uuid NOT NULL
+);
+
+
+--
+-- Name: college_majors; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.college_majors (
+    college_id uuid NOT NULL,
+    major_id uuid NOT NULL
+);
+
+
+--
+-- Name: college_study_formats; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.college_study_formats (
+    college_id uuid NOT NULL,
+    study_format_id uuid NOT NULL
+);
+
+
+--
+-- Name: college_degree_levels college_degree_levels_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.college_degree_levels
+    ADD CONSTRAINT college_degree_levels_pkey PRIMARY KEY (college_id, degree_level_id);
+
+
+--
+-- Name: college_majors college_majors_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.college_majors
+    ADD CONSTRAINT college_majors_pkey PRIMARY KEY (college_id, major_id);
+
+
+--
+-- Name: college_study_formats college_study_formats_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.college_study_formats
+    ADD CONSTRAINT college_study_formats_pkey PRIMARY KEY (college_id, study_format_id);
+
+
+--
+-- Name: college_degree_levels college_degree_levels_college_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.college_degree_levels
+    ADD CONSTRAINT college_degree_levels_college_id_fkey FOREIGN KEY (college_id) REFERENCES public.colleges(id) ON DELETE CASCADE;
+
+
+--
+-- Name: college_degree_levels college_degree_levels_degree_level_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.college_degree_levels
+    ADD CONSTRAINT college_degree_levels_degree_level_id_fkey FOREIGN KEY (degree_level_id) REFERENCES public.degree_levels(id) ON DELETE CASCADE;
+
+
+--
+-- Name: college_majors college_majors_college_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.college_majors
+    ADD CONSTRAINT college_majors_college_id_fkey FOREIGN KEY (college_id) REFERENCES public.colleges(id) ON DELETE CASCADE;
+
+
+--
+-- Name: college_majors college_majors_major_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.college_majors
+    ADD CONSTRAINT college_majors_major_id_fkey FOREIGN KEY (major_id) REFERENCES public.majors(id) ON DELETE CASCADE;
+
+
+--
+-- Name: college_study_formats college_study_formats_college_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.college_study_formats
+    ADD CONSTRAINT college_study_formats_college_id_fkey FOREIGN KEY (college_id) REFERENCES public.colleges(id) ON DELETE CASCADE;
+
+
+--
+-- Name: college_study_formats college_study_formats_study_format_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.college_study_formats
+    ADD CONSTRAINT college_study_formats_study_format_id_fkey FOREIGN KEY (study_format_id) REFERENCES public.study_formats(id) ON DELETE CASCADE;
 
 
 --

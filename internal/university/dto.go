@@ -1,6 +1,10 @@
 package university
 
-import "time"
+import (
+	"time"
+
+	"fmu-backend/internal/programs"
+)
 
 type MajorResponse struct {
 	ID   string `json:"id" example:"125479fb-fccb-43cc-980a-84e1d73117b3"`
@@ -80,12 +84,25 @@ type CreateUniversityRequest struct {
 	IsPopular        bool     `json:"is_popular" example:"true"`
 	IsFeatured       bool     `json:"is_featured" example:"true"`
 
+	MapsUrl          string  `json:"maps_url" validate:"omitempty,url,max=500" example:"https://maps.google.com/?q=MIT"`
+	FullAddress      string  `json:"full_address" validate:"omitempty,max=500" example:"77 Massachusetts Ave, Cambridge, MA 02139"`
+	EmploymentRate   float64 `json:"employment_rate" validate:"omitempty,gte=0,lte=100" example:"92.5"`
+	ResearchOutput   string  `json:"research_output" validate:"omitempty,max=50" example:"R1"`
+	HousingType      string  `json:"housing_type" validate:"omitempty,max=50" example:"On-Campus"`
+	SeoTitle         string  `json:"seo_title" validate:"omitempty,max=70" example:"MIT - Top Research University"`
+	SeoDescription   string  `json:"seo_description" validate:"omitempty,max=160" example:"Learn about MIT admissions, programs, and campus life."`
+
 	DegreeLevelIDs        []string `json:"degree_level_ids" validate:"required,min=1,dive,uuid"`
 	MajorIDs              []string `json:"major_ids" validate:"required,min=1,dive,uuid"`
 	StudyFormatIDs        []string `json:"study_format_ids" validate:"omitempty,dive,uuid"`
 	SpecialAffiliationIDs []string `json:"special_affiliation_ids" validate:"omitempty,dive,uuid"`
 	AthleticIDs           []string `json:"athletic_ids" validate:"omitempty,dive,uuid"`
 	SupportServiceIDs     []string `json:"support_service_ids" validate:"omitempty,dive,uuid"`
+
+	// Status selects the lifecycle stage on create. Defaults to "published"
+	// (every field is then required). "draft" loosens validation to just
+	// `name` + `slug` so an admin can stub the row and finish it later.
+	Status string `json:"status" validate:"omitempty,oneof=draft published" example:"published"`
 }
 
 // PatchUniversityRequest is the body for PATCH /universities/{id}. All fields
@@ -139,6 +156,14 @@ type PatchUniversityRequest struct {
 	IsPopular        *bool     `json:"is_popular,omitempty"`
 	IsFeatured       *bool     `json:"is_featured,omitempty"`
 
+	MapsUrl        *string  `json:"maps_url,omitempty"        validate:"omitempty,url,max=500"`
+	FullAddress    *string  `json:"full_address,omitempty"    validate:"omitempty,max=500"`
+	EmploymentRate *float64 `json:"employment_rate,omitempty" validate:"omitempty,gte=0,lte=100"`
+	ResearchOutput *string  `json:"research_output,omitempty" validate:"omitempty,max=50"`
+	HousingType    *string  `json:"housing_type,omitempty"    validate:"omitempty,max=50"`
+	SeoTitle       *string  `json:"seo_title,omitempty"       validate:"omitempty,max=70"`
+	SeoDescription *string  `json:"seo_description,omitempty" validate:"omitempty,max=160"`
+
 	// nil = leave existing associations untouched; non-nil (including [])
 	// = replace the entire association list.
 	DegreeLevelIDs        *[]string `json:"degree_level_ids,omitempty"        validate:"omitempty,dive,uuid"`
@@ -156,6 +181,7 @@ type AllLookupsResponse struct {
 	SpecialAffiliations []SpecialAffiliationResponse `json:"special_affiliations"`
 	Athletics           []AthleticResponse           `json:"athletics"`
 	SupportServices     []SupportServiceResponse     `json:"support_services"`
+	Programs            []programs.ProgramLookupItem `json:"programs"`
 }
 
 type UniversityListItem struct {
@@ -248,6 +274,15 @@ type CreateUniversityResponse struct {
 	GalleryImages            []string  `json:"gallery_images"`
 	IsPopular                bool      `json:"is_popular"`
 	IsFeatured               bool      `json:"is_featured"`
+	MapsUrl                  string    `json:"maps_url"`
+	FullAddress              string    `json:"full_address"`
+	EmploymentRate           float64   `json:"employment_rate"`
+	ResearchOutput           string    `json:"research_output"`
+	HousingType              string    `json:"housing_type"`
+	SeoTitle                 string    `json:"seo_title"`
+	SeoDescription           string    `json:"seo_description"`
+	Status                   string    `json:"status" example:"published"`
+	PublishedAt              *time.Time `json:"published_at" swaggertype:"string" example:"2026-07-30T12:00:00Z"`
 	CreatedAt                time.Time `json:"created_at"`
 	UpdatedAt                time.Time `json:"updated_at"`
 }

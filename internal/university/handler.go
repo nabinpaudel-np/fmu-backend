@@ -13,6 +13,7 @@ import (
 	"fmu-backend/internal/auth"
 	"fmu-backend/internal/errs"
 	"fmu-backend/internal/pagination"
+	"fmu-backend/internal/programs"
 	"fmu-backend/internal/response"
 	"fmu-backend/internal/validator"
 )
@@ -24,15 +25,23 @@ type favoritesLookup interface {
 	FavoritedUniversityIDs(ctx context.Context, userID string, ids []string) (map[string]struct{}, error)
 }
 
+// programsLookup is the minimal programs dependency the /lookups handler
+// needs to bundle the programs list. programs.ProgramService satisfies it.
+type programsLookup interface {
+	ListAll(ctx context.Context) ([]programs.ProgramLookupItem, error)
+}
+
 type UniversityHandler struct {
 	universityService UniversityService
 	favorites         favoritesLookup
+	programs          programsLookup
 }
 
-func NewUniversityHandler(universityService UniversityService, favs favoritesLookup) *UniversityHandler {
+func NewUniversityHandler(universityService UniversityService, favs favoritesLookup, progs programsLookup) *UniversityHandler {
 	return &UniversityHandler{
 		universityService: universityService,
 		favorites:         favs,
+		programs:          progs,
 	}
 }
 
@@ -124,10 +133,16 @@ func (h *UniversityHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := validator.Validate.Struct(req); err != nil {
-		validationErrors := validator.GetValidationErrors(err)
-		response.ValidationError(w, http.StatusBadRequest, validationErrors)
-		return
+	// Drafts skip the full required-field validation — only name + slug
+	// are required for drafts (enforced in the service). The DTO carries
+	// `validate:"required"` on the rest, so we have to bypass the strict
+	// pass when the caller is explicitly asking for a draft.
+	if req.Status != "draft" {
+		if err := validator.Validate.Struct(req); err != nil {
+			validationErrors := validator.GetValidationErrors(err)
+			response.ValidationError(w, http.StatusBadRequest, validationErrors)
+			return
+		}
 	}
 
 	res, err := h.universityService.Create(r.Context(), &req)
@@ -144,6 +159,18 @@ func (h *UniversityHandler) Create(w http.ResponseWriter, r *http.Request) {
 			response.ValidationError(w, http.StatusBadRequest, details)
 			return
 		}
+		var pubErr *errs.PublishValidationError
+		if errors.As(err, &pubErr) {
+			details := make([]response.ErrorDetail, 0, len(pubErr.Fields))
+			for _, f := range pubErr.Fields {
+				details = append(details, response.ErrorDetail{
+					Field:   f,
+					Message: "required",
+				})
+			}
+			response.ValidationError(w, http.StatusBadRequest, details)
+			return
+		}
 		if errors.Is(err, errs.ErrUniversitySlugTaken) {
 			response.Error(w, http.StatusConflict, err.Error())
 			return
@@ -153,6 +180,33 @@ func (h *UniversityHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.Success(w, http.StatusCreated, res)
+}
+
+func (h *UniversityHandler) Publish(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	res, err := h.universityService.Publish(r.Context(), id)
+	if err != nil {
+		var pubErr *errs.PublishValidationError
+		if errors.As(err, &pubErr) {
+			details := make([]response.ErrorDetail, 0, len(pubErr.Fields))
+			for _, f := range pubErr.Fields {
+				details = append(details, response.ErrorDetail{
+					Field:   f,
+					Message: "required to publish",
+				})
+			}
+			response.ValidationError(w, http.StatusBadRequest, details)
+			return
+		}
+		if errors.Is(err, errs.ErrNotFound) {
+			response.Error(w, http.StatusNotFound, "university not found")
+			return
+		}
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+	response.Success(w, http.StatusOK, res)
 }
 
 func (h *UniversityHandler) Patch(w http.ResponseWriter, r *http.Request) {
@@ -213,6 +267,13 @@ func (h *UniversityHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+
+	// Non-admin callers see only published universities. Drafts and
+	// archived rows are 404'd so they don't leak existence.
+	if !isAdmin(r.Context()) && detail.Status != "published" {
+		response.Error(w, http.StatusNotFound, "university not found")
 		return
 	}
 
@@ -278,6 +339,13 @@ func (h *UniversityHandler) Get(w http.ResponseWriter, r *http.Request) {
 	q := pagination.Parse(r)
 	filters := ParseFilters(r.URL.Query())
 
+	// Non-admin callers can only see published rows. We silently narrow the
+	// status filter to "published" so an attempted `?status=draft` from a
+	// public client returns the public list rather than a 403.
+	if !isAdmin(r.Context()) {
+		filters.Status = "published"
+	}
+
 	items, total, err := h.universityService.Get(r.Context(), q, filters)
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "something went wrong")
@@ -294,6 +362,14 @@ func (h *UniversityHandler) Get(w http.ResponseWriter, r *http.Request) {
 		Items: items,
 		Meta:  q.BuildMeta(total),
 	})
+}
+
+func isAdmin(ctx context.Context) bool {
+	claims, err := auth.ClaimsFromContext(ctx)
+	if err != nil {
+		return false
+	}
+	return claims.Role == auth.RoleAdmin
 }
 
 func (h *UniversityHandler) GetMajors(w http.ResponseWriter, r *http.Request) {
@@ -355,6 +431,11 @@ func (h *UniversityHandler) GetAllLookups(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "something went wrong")
 		return
+	}
+	// Bundle programs alongside the other reference lists. Best-effort: if
+	// the lookup fails the rest still serves, just without programs.
+	if progs, err := h.programs.ListAll(r.Context()); err == nil {
+		lookups.Programs = progs
 	}
 	response.Success(w, http.StatusOK, lookups)
 }

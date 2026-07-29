@@ -27,7 +27,9 @@ INSERT INTO colleges (
     cover_image, logo, institution_type, campus_setting,
     contact_email, contact_phone, website, zipcode,
     founded_year, campus_size, gallery_images,
-    is_popular, is_featured
+    is_popular, is_featured,
+    full_address, maps_url, seo_title, seo_description,
+    status
 )
 VALUES (
     $1, $2, $3, $4, $5,
@@ -35,7 +37,9 @@ VALUES (
     $10, $11, $12, $13,
     $14, $15, $16, $17,
     $18, $19, $20,
-    $21, $22
+    $21, $22,
+    $23, $24, $25, $26,
+    $27
 )
 RETURNING
     id, name, slug, university_id, overview, excerpt,
@@ -43,7 +47,9 @@ RETURNING
     cover_image, logo, institution_type, campus_setting,
     contact_email, contact_phone, website, zipcode,
     founded_year, campus_size, gallery_images,
-    is_popular, is_featured, created_at, updated_at
+    is_popular, is_featured,
+    full_address, maps_url, seo_title, seo_description,
+    status, published_at, created_at, updated_at
 `
 
 type CreateCollegeParams struct {
@@ -69,6 +75,11 @@ type CreateCollegeParams struct {
 	GalleryImages   []string
 	IsPopular       bool
 	IsFeatured      bool
+	FullAddress     *string
+	MapsUrl         *string
+	SeoTitle        *string
+	SeoDescription  *string
+	Status          string
 }
 
 func (q *Queries) CreateCollege(ctx context.Context, arg CreateCollegeParams) (College, error) {
@@ -95,6 +106,11 @@ func (q *Queries) CreateCollege(ctx context.Context, arg CreateCollegeParams) (C
 		arg.GalleryImages,
 		arg.IsPopular,
 		arg.IsFeatured,
+		arg.FullAddress,
+		arg.MapsUrl,
+		arg.SeoTitle,
+		arg.SeoDescription,
+		arg.Status,
 	)
 	var i College
 	err := row.Scan(
@@ -121,10 +137,43 @@ func (q *Queries) CreateCollege(ctx context.Context, arg CreateCollegeParams) (C
 		&i.GalleryImages,
 		&i.IsPopular,
 		&i.IsFeatured,
+		&i.FullAddress,
+		&i.MapsUrl,
+		&i.SeoTitle,
+		&i.SeoDescription,
+		&i.Status,
+		&i.PublishedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const deleteCollegeDegreeLevels = `-- name: DeleteCollegeDegreeLevels :exec
+DELETE FROM college_degree_levels WHERE college_id = $1
+`
+
+func (q *Queries) DeleteCollegeDegreeLevels(ctx context.Context, collegeID string) error {
+	_, err := q.db.Exec(ctx, deleteCollegeDegreeLevels, collegeID)
+	return err
+}
+
+const deleteCollegeMajors = `-- name: DeleteCollegeMajors :exec
+DELETE FROM college_majors WHERE college_id = $1
+`
+
+func (q *Queries) DeleteCollegeMajors(ctx context.Context, collegeID string) error {
+	_, err := q.db.Exec(ctx, deleteCollegeMajors, collegeID)
+	return err
+}
+
+const deleteCollegeStudyFormats = `-- name: DeleteCollegeStudyFormats :exec
+DELETE FROM college_study_formats WHERE college_id = $1
+`
+
+func (q *Queries) DeleteCollegeStudyFormats(ctx context.Context, collegeID string) error {
+	_, err := q.db.Exec(ctx, deleteCollegeStudyFormats, collegeID)
+	return err
 }
 
 const getCollegeByID = `-- name: GetCollegeByID :one
@@ -134,7 +183,9 @@ SELECT
     cover_image, logo, institution_type, campus_setting,
     contact_email, contact_phone, website, zipcode,
     founded_year, campus_size, gallery_images,
-    is_popular, is_featured, created_at, updated_at
+    is_popular, is_featured,
+    full_address, maps_url, seo_title, seo_description,
+    status, published_at, created_at, updated_at
 FROM colleges
 WHERE id = $1
 `
@@ -166,10 +217,220 @@ func (q *Queries) GetCollegeByID(ctx context.Context, id string) (College, error
 		&i.GalleryImages,
 		&i.IsPopular,
 		&i.IsFeatured,
+		&i.FullAddress,
+		&i.MapsUrl,
+		&i.SeoTitle,
+		&i.SeoDescription,
+		&i.Status,
+		&i.PublishedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getCollegeDegreeLevels = `-- name: GetCollegeDegreeLevels :many
+SELECT dl.id, dl.name
+FROM degree_levels dl
+JOIN college_degree_levels cdl ON dl.id = cdl.degree_level_id
+WHERE cdl.college_id = $1
+ORDER BY dl.name
+`
+
+func (q *Queries) GetCollegeDegreeLevels(ctx context.Context, collegeID string) ([]DegreeLevel, error) {
+	rows, err := q.db.Query(ctx, getCollegeDegreeLevels, collegeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DegreeLevel{}
+	for rows.Next() {
+		var i DegreeLevel
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getCollegeMajors = `-- name: GetCollegeMajors :many
+SELECT m.id, m.name
+FROM majors m
+JOIN college_majors cm ON m.id = cm.major_id
+WHERE cm.college_id = $1
+ORDER BY m.name
+`
+
+func (q *Queries) GetCollegeMajors(ctx context.Context, collegeID string) ([]Major, error) {
+	rows, err := q.db.Query(ctx, getCollegeMajors, collegeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Major{}
+	for rows.Next() {
+		var i Major
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getCollegeStudyFormats = `-- name: GetCollegeStudyFormats :many
+SELECT sf.id, sf.name
+FROM study_formats sf
+JOIN college_study_formats csf ON sf.id = csf.study_format_id
+WHERE csf.college_id = $1
+ORDER BY sf.name
+`
+
+func (q *Queries) GetCollegeStudyFormats(ctx context.Context, collegeID string) ([]StudyFormat, error) {
+	rows, err := q.db.Query(ctx, getCollegeStudyFormats, collegeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []StudyFormat{}
+	for rows.Next() {
+		var i StudyFormat
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getExistingCollegeDegreeLevelIDs = `-- name: GetExistingCollegeDegreeLevelIDs :many
+SELECT id FROM degree_levels WHERE id = ANY($1::uuid[])
+`
+
+func (q *Queries) GetExistingCollegeDegreeLevelIDs(ctx context.Context, dollar_1 []string) ([]string, error) {
+	rows, err := q.db.Query(ctx, getExistingCollegeDegreeLevelIDs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getExistingCollegeMajorIDs = `-- name: GetExistingCollegeMajorIDs :many
+SELECT id FROM majors WHERE id = ANY($1::uuid[])
+`
+
+func (q *Queries) GetExistingCollegeMajorIDs(ctx context.Context, dollar_1 []string) ([]string, error) {
+	rows, err := q.db.Query(ctx, getExistingCollegeMajorIDs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getExistingCollegeStudyFormatIDs = `-- name: GetExistingCollegeStudyFormatIDs :many
+SELECT id FROM study_formats WHERE id = ANY($1::uuid[])
+`
+
+func (q *Queries) GetExistingCollegeStudyFormatIDs(ctx context.Context, dollar_1 []string) ([]string, error) {
+	rows, err := q.db.Query(ctx, getExistingCollegeStudyFormatIDs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const insertCollegeDegreeLevels = `-- name: InsertCollegeDegreeLevels :exec
+INSERT INTO college_degree_levels (college_id, degree_level_id)
+SELECT $1, unnest($2::uuid[])
+ON CONFLICT (college_id, degree_level_id) DO NOTHING
+`
+
+type InsertCollegeDegreeLevelsParams struct {
+	CollegeID string
+	Column2   []string
+}
+
+func (q *Queries) InsertCollegeDegreeLevels(ctx context.Context, arg InsertCollegeDegreeLevelsParams) error {
+	_, err := q.db.Exec(ctx, insertCollegeDegreeLevels, arg.CollegeID, arg.Column2)
+	return err
+}
+
+const insertCollegeMajors = `-- name: InsertCollegeMajors :exec
+INSERT INTO college_majors (college_id, major_id)
+SELECT $1, unnest($2::uuid[])
+ON CONFLICT (college_id, major_id) DO NOTHING
+`
+
+type InsertCollegeMajorsParams struct {
+	CollegeID string
+	Column2   []string
+}
+
+func (q *Queries) InsertCollegeMajors(ctx context.Context, arg InsertCollegeMajorsParams) error {
+	_, err := q.db.Exec(ctx, insertCollegeMajors, arg.CollegeID, arg.Column2)
+	return err
+}
+
+const insertCollegeStudyFormats = `-- name: InsertCollegeStudyFormats :exec
+INSERT INTO college_study_formats (college_id, study_format_id)
+SELECT $1, unnest($2::uuid[])
+ON CONFLICT (college_id, study_format_id) DO NOTHING
+`
+
+type InsertCollegeStudyFormatsParams struct {
+	CollegeID string
+	Column2   []string
+}
+
+func (q *Queries) InsertCollegeStudyFormats(ctx context.Context, arg InsertCollegeStudyFormatsParams) error {
+	_, err := q.db.Exec(ctx, insertCollegeStudyFormats, arg.CollegeID, arg.Column2)
+	return err
 }
 
 const listCollegesByUniversity = `-- name: ListCollegesByUniversity :many
@@ -179,7 +440,9 @@ SELECT
     cover_image, logo, institution_type, campus_setting,
     contact_email, contact_phone, website, zipcode,
     founded_year, campus_size, gallery_images,
-    is_popular, is_featured, created_at, updated_at
+    is_popular, is_featured,
+    full_address, maps_url, seo_title, seo_description,
+    status, published_at, created_at, updated_at
 FROM colleges
 WHERE university_id = $1
 ORDER BY name
@@ -225,6 +488,12 @@ func (q *Queries) ListCollegesByUniversity(ctx context.Context, arg ListColleges
 			&i.GalleryImages,
 			&i.IsPopular,
 			&i.IsFeatured,
+			&i.FullAddress,
+			&i.MapsUrl,
+			&i.SeoTitle,
+			&i.SeoDescription,
+			&i.Status,
+			&i.PublishedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -265,6 +534,61 @@ func (q *Queries) ListRepresentedCollegeIDs(ctx context.Context, dollar_1 []stri
 	return items, nil
 }
 
+const publishCollege = `-- name: PublishCollege :one
+UPDATE colleges
+SET status = 'published',
+    published_at = NOW(),
+    updated_at = NOW()
+WHERE id = $1
+RETURNING id, name, slug, university_id, overview, excerpt,
+    country, state, city, full_location,
+    cover_image, logo, institution_type, campus_setting,
+    contact_email, contact_phone, website, zipcode,
+    founded_year, campus_size, gallery_images,
+    is_popular, is_featured,
+    full_address, maps_url, seo_title, seo_description,
+    status, published_at, created_at, updated_at
+`
+
+func (q *Queries) PublishCollege(ctx context.Context, id string) (College, error) {
+	row := q.db.QueryRow(ctx, publishCollege, id)
+	var i College
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.UniversityID,
+		&i.Overview,
+		&i.Excerpt,
+		&i.Country,
+		&i.State,
+		&i.City,
+		&i.FullLocation,
+		&i.CoverImage,
+		&i.Logo,
+		&i.InstitutionType,
+		&i.CampusSetting,
+		&i.ContactEmail,
+		&i.ContactPhone,
+		&i.Website,
+		&i.Zipcode,
+		&i.FoundedYear,
+		&i.CampusSize,
+		&i.GalleryImages,
+		&i.IsPopular,
+		&i.IsFeatured,
+		&i.FullAddress,
+		&i.MapsUrl,
+		&i.SeoTitle,
+		&i.SeoDescription,
+		&i.Status,
+		&i.PublishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const searchColleges = `-- name: SearchColleges :many
 SELECT
     c.id,
@@ -281,13 +605,14 @@ SELECT
     COALESCE(c.logo, '') AS logo
 FROM colleges c
 JOIN universities u ON u.id = c.university_id
-WHERE similarity(c.name, $1) > 0.2
+WHERE c.status = 'published'
+  AND (similarity(c.name, $1) > 0.2
    OR similarity(c.full_location, $1) > 0.2
    OR similarity(c.city, $1) > 0.2
    OR similarity(c.state, $1) > 0.2
    OR similarity(c.country, $1) > 0.2
    OR similarity(u.name, $1) > 0.2
-   OR similarity(u.slug, $1) > 0.2
+   OR similarity(u.slug, $1) > 0.2)
 ORDER BY GREATEST(
     similarity(c.name, $1),
     similarity(c.full_location, $1),

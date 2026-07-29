@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -15,6 +16,26 @@ import (
 	"fmu-backend/internal/response"
 	"fmu-backend/internal/validator"
 )
+
+// collegeResourceField maps a lookup-table name to the request-DTO field
+// that references it, so error messages name the field the client sent.
+// Mirrors university.resourceField but only covers the three lookups
+// colleges actually use.
+var collegeResourceField = map[string]string{
+	"degree_levels": "degree_level_ids",
+	"majors":        "major_ids",
+	"study_formats": "study_format_ids",
+}
+
+// formatMissingCollegeIDs caps the list at 10 IDs so a payload with hundreds
+// of bad IDs doesn't bloat the error response.
+func formatMissingCollegeIDs(ids []string) string {
+	const cap = 10
+	if len(ids) <= cap {
+		return strings.Join(ids, ", ")
+	}
+	return strings.Join(ids[:cap], ", ") + fmt.Sprintf(" (and %d more)", len(ids)-cap)
+}
 
 // favoritesLookup is the minimal favorites dependency the public list/search
 // handlers need to stamp `is_favorited`. Defined inline so this package only
@@ -100,14 +121,33 @@ func (h *CollegeHandler) Create(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if err := validator.Validate.Struct(&req); err != nil {
-		fields := validator.GetValidationErrors(err)
-		response.ValidationError(w, http.StatusBadRequest, fields)
-		return
+
+	// Drafts skip the full required-field validation — only name + slug
+	// are required for drafts (enforced in the service). The DTO carries
+	// `validate:"required"` on the rest, so we have to bypass the strict
+	// pass when the caller is explicitly asking for a draft.
+	if req.Status != "draft" {
+		if err := validator.Validate.Struct(&req); err != nil {
+			fields := validator.GetValidationErrors(err)
+			response.ValidationError(w, http.StatusBadRequest, fields)
+			return
+		}
 	}
 
 	res, err := h.collegeService.Create(r.Context(), &req)
 	if err != nil {
+		var pubErr *errs.PublishValidationError
+		if errors.As(err, &pubErr) {
+			details := make([]response.ErrorDetail, 0, len(pubErr.Fields))
+			for _, f := range pubErr.Fields {
+				details = append(details, response.ErrorDetail{
+					Field:   f,
+					Message: "required",
+				})
+			}
+			response.ValidationError(w, http.StatusBadRequest, details)
+			return
+		}
 		switch {
 		case errors.Is(err, errs.ErrCollegeSlugTaken):
 			response.Error(w, http.StatusConflict, err.Error())
@@ -123,9 +163,43 @@ func (h *CollegeHandler) Create(w http.ResponseWriter, r *http.Request) {
 	response.Success(w, http.StatusCreated, res)
 }
 
+func (h *CollegeHandler) Publish(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	res, err := h.collegeService.Publish(r.Context(), id)
+	if err != nil {
+		var pubErr *errs.PublishValidationError
+		if errors.As(err, &pubErr) {
+			details := make([]response.ErrorDetail, 0, len(pubErr.Fields))
+			for _, f := range pubErr.Fields {
+				details = append(details, response.ErrorDetail{
+					Field:   f,
+					Message: "required to publish",
+				})
+			}
+			response.ValidationError(w, http.StatusBadRequest, details)
+			return
+		}
+		if errors.Is(err, errs.ErrNotFound) {
+			response.Error(w, http.StatusNotFound, "college not found")
+			return
+		}
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+	response.Success(w, http.StatusOK, res)
+}
+
 func (h *CollegeHandler) List(w http.ResponseWriter, r *http.Request) {
 	q := pagination.Parse(r)
 	filters := ParseFilters(r.URL.Query())
+
+	// Non-admin callers can only see published rows. We silently narrow the
+	// status filter to "published" so an attempted `?status=draft` from a
+	// public client returns the public list rather than a 403.
+	if !isAdmin(r.Context()) {
+		filters.Status = "published"
+	}
 
 	items, total, err := h.collegeService.List(r.Context(), q, filters)
 	if err != nil {
@@ -158,6 +232,13 @@ func (h *CollegeHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Non-admin callers see only published colleges. Drafts and
+	// archived rows are 404'd so they don't leak existence.
+	if !isAdmin(r.Context()) && detail.Status != "published" {
+		response.Error(w, http.StatusNotFound, "college not found")
+		return
+	}
+
 	set, err := h.collegeService.RepresentedIDs(r.Context(), []string{detail.ID})
 	if err != nil {
 		response.Error(w, http.StatusInternalServerError, "something went wrong")
@@ -184,6 +265,18 @@ func (h *CollegeHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.collegeService.Update(r.Context(), id, &req)
 	if err != nil {
+		var refErr *errs.InvalidReferencesError
+		if errors.As(err, &refErr) {
+			details := make([]response.ErrorDetail, 0, len(refErr.References))
+			for resource, ids := range refErr.References {
+				details = append(details, response.ErrorDetail{
+					Field:   collegeResourceField[resource],
+					Message: fmt.Sprintf("the following %s do not exist: [%s]", resource, formatMissingCollegeIDs(ids)),
+				})
+			}
+			response.ValidationError(w, http.StatusBadRequest, details)
+			return
+		}
 		switch {
 		case errors.Is(err, errs.ErrNotFound):
 			response.Error(w, http.StatusNotFound, "college not found")
@@ -262,4 +355,12 @@ func (h *CollegeHandler) Search(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.Success(w, http.StatusOK, pagination.ItemsResponse[CollegeSearchResult]{Items: items})
+}
+
+func isAdmin(ctx context.Context) bool {
+	claims, err := auth.ClaimsFromContext(ctx)
+	if err != nil {
+		return false
+	}
+	return claims.Role == auth.RoleAdmin
 }

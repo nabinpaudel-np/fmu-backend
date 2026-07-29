@@ -60,8 +60,9 @@ func (h *ClaimHandler) Submit(target ClaimTarget) http.HandlerFunc {
 	}
 }
 
-// List handles GET /api/v1/admin/claims?type=university|college&status=pending|approved|rejected.
-// Admin only. Empty type returns both universities and colleges merged.
+// List handles GET /api/v1/admin/claims?type=university|college&status=pending|approved|rejected|all.
+// Admin only. Empty type returns both universities and colleges merged. Empty
+// (or `all`) status returns every status.
 func (h *ClaimHandler) List(w http.ResponseWriter, r *http.Request) {
 	q := pagination.Parse(r)
 	statusFilter := r.URL.Query().Get("status")
@@ -75,7 +76,7 @@ func (h *ClaimHandler) List(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, errs.ErrBadRequest):
-			response.Error(w, http.StatusBadRequest, "status must be one of: pending, approved, rejected")
+			response.Error(w, http.StatusBadRequest, "status must be one of: pending, approved, rejected, all")
 		default:
 			response.Error(w, http.StatusInternalServerError, "something went wrong")
 		}

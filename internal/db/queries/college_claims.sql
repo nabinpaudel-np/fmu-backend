@@ -17,7 +17,7 @@ WHERE c.id = $1;
 
 -- name: CountCollegeClaims :one
 SELECT COUNT(*) FROM college_claims
-WHERE ($1::text IS NULL OR status = $1);
+WHERE ($1::text = '' OR status = $1);
 
 -- name: ListCollegeClaims :many
 SELECT
@@ -27,7 +27,7 @@ SELECT
     c.created_user_id, c.created_at, c.updated_at
 FROM college_claims c
 JOIN colleges co ON co.id = c.college_id
-WHERE ($1::text IS NULL OR c.status = $1)
+WHERE ($1::text = '' OR c.status = $1)
 ORDER BY c.created_at DESC
 LIMIT $2 OFFSET $3;
 

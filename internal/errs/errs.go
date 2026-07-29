@@ -29,6 +29,8 @@ var (
 	ErrClaimRoleNotAllowed                = errors.New("only non-student, non-admin users may submit a claim")
 	ErrRepOutOfScope                      = errors.New("representative can only edit their own university")
 	ErrRepCannotChangeNameOrSlug          = errors.New("representatives cannot change name or slug")
+	ErrProgramDegreeNotFound              = errors.New("degree does not exist")
+	ErrPublishMissingFields               = errors.New("missing required fields for publish")
 )
 
 // InvalidReferencesError is returned when one or more UUIDs in a request
@@ -44,4 +46,16 @@ func (e *InvalidReferencesError) Error() string {
 		parts = append(parts, fmt.Sprintf("%s not found: %v", resource, ids))
 	}
 	return "invalid references: " + strings.Join(parts, "; ")
+}
+
+// PublishValidationError is returned when a draft university or college is
+// published before all required fields are filled in. Fields lists the
+// request-DTO field names that are still empty/missing. The handler maps
+// it to a 400 with the field list.
+type PublishValidationError struct {
+	Fields []string
+}
+
+func (e *PublishValidationError) Error() string {
+	return ErrPublishMissingFields.Error() + ": " + strings.Join(e.Fields, ", ")
 }
