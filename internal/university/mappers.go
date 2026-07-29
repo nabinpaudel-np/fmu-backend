@@ -1,6 +1,8 @@
 package university
 
 import (
+	"time"
+
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"fmu-backend/internal/db/sqlc"
@@ -45,7 +47,22 @@ func toCreateUniversityParams(req *CreateUniversityRequest) sqlc.CreateUniversit
 		GalleryImages:            req.GalleryImages,
 		IsPopular:                req.IsPopular,
 		IsFeatured:               req.IsFeatured,
+		MapsUrl:                  &req.MapsUrl,
+		FullAddress:              &req.FullAddress,
+		EmploymentRate:           toPgNumeric(req.EmploymentRate),
+		ResearchOutput:           &req.ResearchOutput,
+		HousingType:              &req.HousingType,
+		SeoTitle:                 &req.SeoTitle,
+		SeoDescription:           &req.SeoDescription,
+		Status:                   statusOrDefault(req.Status),
 	}
+}
+
+func statusOrDefault(s string) string {
+	if s == "" {
+		return "published"
+	}
+	return s
 }
 
 func toCreateUniversityResponse(u sqlc.University) *CreateUniversityResponse {
@@ -88,9 +105,25 @@ func toCreateUniversityResponse(u sqlc.University) *CreateUniversityResponse {
 		GalleryImages:            u.GalleryImages,
 		IsPopular:                u.IsPopular,
 		IsFeatured:               u.IsFeatured,
+		MapsUrl:                  derefString(u.MapsUrl),
+		FullAddress:              derefString(u.FullAddress),
+		EmploymentRate:           fromPgNumeric(u.EmploymentRate),
+		ResearchOutput:           derefString(u.ResearchOutput),
+		HousingType:              derefString(u.HousingType),
+		SeoTitle:                 derefString(u.SeoTitle),
+		SeoDescription:           derefString(u.SeoDescription),
+		Status:                   u.Status,
+		PublishedAt:              publishedAtPtr(u.PublishedAt),
 		CreatedAt:                u.CreatedAt,
 		UpdatedAt:                u.UpdatedAt,
 	}
+}
+
+func publishedAtPtr(t pgtype.Timestamptz) *time.Time {
+	if !t.Valid {
+		return nil
+	}
+	return &t.Time
 }
 
 func derefString(s *string) string {
