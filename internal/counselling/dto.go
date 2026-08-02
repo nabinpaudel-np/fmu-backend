@@ -23,6 +23,26 @@ func (t TargetType) IsValid() bool {
 	return false
 }
 
+// InquiryType discriminates between the two forms writing into the same
+// counselling_inquiries table. Brochure rows live behind the same
+// moderation endpoint but are admin-only at the access layer.
+type InquiryType string
+
+const (
+	InquiryTypeCounselling InquiryType = "counselling"
+	InquiryTypeBrochure    InquiryType = "brochure"
+)
+
+// IsValid reports whether the input is a known inquiry type. Used by the
+// handler to reject bad ?inquiry_type= filter values.
+func (t InquiryType) IsValid() bool {
+	switch t {
+	case InquiryTypeCounselling, InquiryTypeBrochure:
+		return true
+	}
+	return false
+}
+
 const (
 	StatusPending  = "pending"
 	StatusReviewed = "reviewed"
@@ -55,41 +75,55 @@ type SubmitSpecificRequest struct {
 	Message           string `json:"message"            validate:"omitempty,max=5000"`
 }
 
-// SubmitResponse is what the three public submit endpoints return. We expose
-// only the inquiry id + status; admin/rep dashboards see the rest.
+// SubmitBrochureRequest is the body for POST /universities/{id}/brochure.
+// The brochure form is a strict subset of the counselling form — full_name,
+// email, phone, program_of_interest. Country / start_term / current_education /
+// test_scores / message are persisted as NULL because brochure requests don't
+// need them.
+type SubmitBrochureRequest struct {
+	FullName          string `json:"full_name"           validate:"required,min=2,max=255"`
+	Email             string `json:"email"               validate:"required,email,max=255"`
+	Phone             string `json:"phone"               validate:"required,min=4,max=50"`
+	ProgramOfInterest string `json:"program_of_interest" validate:"omitempty,max=255"`
+}
+
+// SubmitResponse is what the public submit endpoints return. We expose only
+// the inquiry id + status; admin dashboards see the rest.
 type SubmitResponse struct {
-	InquiryID string     `json:"inquiry_id"`
-	Type      TargetType `json:"type"`
-	TargetID  *string    `json:"target_id,omitempty"`
-	Status    string     `json:"status"`
-	CreatedAt time.Time  `json:"created_at"`
+	InquiryID    string      `json:"inquiry_id"`
+	Type         TargetType  `json:"type"`
+	TargetID     *string     `json:"target_id,omitempty"`
+	InquiryType  InquiryType `json:"inquiry_type"`
+	Status       string      `json:"status"`
+	CreatedAt    time.Time   `json:"created_at"`
 }
 
 // CounsellingListItem is the row shape returned by GET admin/representative
 // list endpoints. Fields are flattened into one struct since the table holds
 // all variants; nullable DB columns map to omitempty JSON fields.
 type CounsellingListItem struct {
-	ID                  string     `json:"id"`
-	Type                TargetType `json:"type"`
-	TargetID            *string    `json:"target_id,omitempty"`
-	TargetName          string     `json:"target_name,omitempty"`
-	FullName            string     `json:"full_name"`
-	Email               string     `json:"email"`
-	Phone               string     `json:"phone,omitempty"`
-	Country             string     `json:"country,omitempty"`
-	PreferredUniversity string     `json:"preferred_university,omitempty"`
-	ProgramOfInterest   string     `json:"program_of_interest,omitempty"`
-	StartTerm           string     `json:"start_term,omitempty"`
-	CurrentEducation    string     `json:"current_education,omitempty"`
-	TestScores          string     `json:"test_scores,omitempty"`
-	Message             string     `json:"message,omitempty"`
-	ResumeURL           string     `json:"resume_url,omitempty"`
-	Status              string     `json:"status"`
-	ReviewerID          *string    `json:"reviewer_id,omitempty"`
-	ReviewedAt          *time.Time `json:"reviewed_at,omitempty"`
-	ReviewNote          string     `json:"review_note,omitempty"`
-	CreatedAt           time.Time  `json:"created_at"`
-	UpdatedAt           time.Time  `json:"updated_at"`
+	ID                  string      `json:"id"`
+	Type                TargetType  `json:"type"`
+	InquiryType         InquiryType `json:"inquiry_type"`
+	TargetID            *string     `json:"target_id,omitempty"`
+	TargetName          string      `json:"target_name,omitempty"`
+	FullName            string      `json:"full_name"`
+	Email               string      `json:"email"`
+	Phone               string      `json:"phone,omitempty"`
+	Country             string      `json:"country,omitempty"`
+	PreferredUniversity string      `json:"preferred_university,omitempty"`
+	ProgramOfInterest   string      `json:"program_of_interest,omitempty"`
+	StartTerm           string      `json:"start_term,omitempty"`
+	CurrentEducation    string      `json:"current_education,omitempty"`
+	TestScores          string      `json:"test_scores,omitempty"`
+	Message             string      `json:"message,omitempty"`
+	ResumeURL           string      `json:"resume_url,omitempty"`
+	Status              string      `json:"status"`
+	ReviewerID          *string     `json:"reviewer_id,omitempty"`
+	ReviewedAt          *time.Time  `json:"reviewed_at,omitempty"`
+	ReviewNote          string      `json:"review_note,omitempty"`
+	CreatedAt           time.Time   `json:"created_at"`
+	UpdatedAt           time.Time   `json:"updated_at"`
 }
 
 // UpdateRequest is the body for PATCH .../counselling/{id}. Status transitions

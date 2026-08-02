@@ -1196,6 +1196,7 @@ CREATE TABLE public.counselling_inquiries (
     message text,
     resume_url character varying(500),
     status character varying(20) DEFAULT 'pending'::character varying NOT NULL,
+    inquiry_type character varying(20) DEFAULT 'counselling'::character varying NOT NULL,
     reviewer_id uuid,
     reviewed_at timestamp with time zone,
     review_note text,
@@ -1203,7 +1204,8 @@ CREATE TABLE public.counselling_inquiries (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT counselling_inquiries_target_type_check CHECK (target_type::text IS NULL OR target_type::text = ANY (ARRAY['university'::character varying, 'college'::character varying]::text[])),
     CONSTRAINT counselling_inquiries_target_pair_check CHECK (((target_type IS NULL) AND (target_id IS NULL)) OR ((target_type IS NOT NULL) AND (target_id IS NOT NULL))),
-    CONSTRAINT counselling_inquiries_status_check CHECK (status::text = ANY (ARRAY['pending'::character varying, 'reviewed'::character varying, 'archived'::character varying]::text[]))
+    CONSTRAINT counselling_inquiries_status_check CHECK (status::text = ANY (ARRAY['pending'::character varying, 'reviewed'::character varying, 'archived'::character varying]::text[])),
+    CONSTRAINT counselling_inquiries_inquiry_type_check CHECK (inquiry_type::text = ANY (ARRAY['counselling'::character varying, 'brochure'::character varying]::text[]))
 );
 
 
@@ -1242,3 +1244,46 @@ CREATE INDEX idx_counselling_inquiries_status_created ON public.counselling_inqu
 --
 
 CREATE INDEX idx_counselling_inquiries_created_at ON public.counselling_inquiries USING btree (created_at DESC);
+
+
+--
+-- Name: idx_counselling_inquiries_inquiry_type; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_counselling_inquiries_inquiry_type ON public.counselling_inquiries USING btree (inquiry_type, created_at DESC);
+
+
+--
+-- Name: password_reset_tokens; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.password_reset_tokens (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    token_hash character varying(255) NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    used_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: idx_password_reset_tokens_token; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_password_reset_tokens_token ON public.password_reset_tokens USING btree (token_hash);
+
+
+--
+-- Name: idx_password_reset_tokens_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_password_reset_tokens_user_id ON public.password_reset_tokens USING btree (user_id);
+
+
+--
+-- Name: password_reset_tokens password_reset_tokens_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.password_reset_tokens
+    ADD CONSTRAINT password_reset_tokens_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;

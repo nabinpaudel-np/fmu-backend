@@ -476,6 +476,96 @@ After logout, the server immediately rejects any further use of the old refresh 
 
 ---
 
+### POST `/api/v1/auth/forgot-password`
+
+Request a one-time password-reset link. **Always returns `200 OK`** with an `account_type` flag the frontend uses to pick the next screen.
+
+If the email corresponds to a real account with a password, the server mints a SHA-256-hashed reset token (raw plaintext is sent to the user via email), stores it with a 1-hour TTL (`PASSWORD_RESET_EXPIRY` env var), and emails a link of the form `${FRONTEND_URL}/reset-password?token=...`. For OAuth-only accounts (no password on file) no email is sent — instead the response flags `account_type: "oauth"` so the SPA can show "sign in with Google" instead of an empty "check your inbox" promise. For unknown emails the response flags `account_type: "none"` so the SPA can render a generic "if an account exists, you'll receive an email" message.
+
+> ⚠️ This endpoint **does not** silently drop OAuth-only users — the response names the account type so the frontend can drive a clean UX. The trade-off is that the response confirms whether a given email is registered. Document this when wiring any analytics on this endpoint; don't expose the raw response in places attackers can probe.
+
+SMTP failure is logged but does not fail the request — when the email send blips for a real password user the response still says `"password"` and an admin can hand-deliver the link from the database row.
+
+**Auth:** public
+
+**Request body:**
+```json
+{ "email": "ada@example.com" }
+```
+
+| Field   | Type   | Rules                  |
+|---------|--------|------------------------|
+| `email` | string | required, valid email  |
+
+**Response:** `200 OK`
+```json
+{ "success": true, "data": { "account_type": "password" } }
+```
+
+`account_type` is one of:
+- `"password"` — email was sent (real account with a password)
+- `"oauth"`    — account exists but signed up via Google; no email sent — show "sign in with Google"
+- `"none"`     — no such account; show generic "if an account exists..." copy
+
+**Errors:**
+- `400` — request body is malformed JSON or fails validation (e.g. invalid email format)
+
+**Curl example:**
+```bash
+curl -X POST http://localhost:3000/api/v1/auth/forgot-password \
+  -H "Content-Type: application/json" \
+  -d '{"email":"ada@example.com"}'
+```
+
+---
+
+### POST `/api/v1/auth/reset-password`
+
+Consume a reset token, set a new password, and immediately issue a fresh login session in the response. The token is single-use (a replay returns `400`) and expires after `PASSWORD_RESET_EXPIRY` (default `1h`).
+
+On success, all existing `refresh_token` cookies for the user are revoked — every other device signed in to that account is forced to re-authenticate. The response body has the same shape as `/auth/login` so the SPA can replace its user state in one round trip.
+
+**Auth:** public — the token in the body *is* the credential.
+
+**Request body:**
+```json
+{
+  "token": "EBrg9k...long-base64url-string...",
+  "password": "new-correct-horse-battery-staple"
+}
+```
+
+| Field      | Type   | Rules                       |
+|------------|--------|-----------------------------|
+| `token`    | string | required, min 10 chars — the raw token from the reset email link |
+| `password` | string | required, min 8 chars       |
+
+**Response:** `200 OK` — sets `access_token` + `refresh_token` cookies and returns the standard login payload:
+```json
+{
+  "success": true,
+  "data": {
+    "user_id":   "d3b07384-d9a2-4e0a-b71e-1c9f3e3e0a1b",
+    "full_name": "Ada Lovelace",
+    "email":     "ada@example.com",
+    "role":      "student"
+  }
+}
+```
+
+**Errors:**
+- `400` — validation failed (e.g. password too short), token unknown (`"invalid password reset token"`), already used (`"password reset token has already been used"`), or expired (`"password reset token has expired"`)
+- `500` — server error — the token is **not** consumed on 500, so retrying is safe
+
+**Curl example:**
+```bash
+curl -i -X POST http://localhost:3000/api/v1/auth/reset-password \
+  -H "Content-Type: application/json" \
+  -d '{"token":"EBrg9k...long-base64url-string...","password":"new-correct-horse-battery-staple"}'
+```
+
+---
+
 ### GET `/api/v1/auth/me`
 
 Return the currently-authenticated user. Use this on app load to bootstrap user state in the SPA — it's the only way to know "who am I?" from a page reload, because the auth cookies are HttpOnly and the frontend can't read the JWT directly.
@@ -2503,12 +2593,13 @@ A university representative sending another university's ID in `POST /api/v1/col
 
 ## Counselling endpoints
 
-Two flavours of free-counselling form, both fully public — no authentication required to submit:
+Three flavours of public form — no authentication required to submit:
 
 1. **General counselling** — not tied to any institution. Carries a free-text `preferred_country`, an optional `preferred_university` name, and an optional resume upload.
 2. **Institution-specific counselling** — submitted from a university or college detail page. Carries richer academic context (program of interest, start term, current education, test scores, free-form message). `phone` and `start_term` are required.
+3. **Brochure request** — submitted from a university detail page ("Get the Program Brochure"). A slim subset of the institution-specific form: full name, email, phone, and program of interest. Persisted with `inquiry_type='brochure'` so admins can pull them out of the feed, but the admin can also see them in the default mixed list.
 
-Both rows are visible to admins. Institution-specific rows are also visible to that institution's representative so they can follow up; representatives can also update status. General rows are admin-only because they have no natural owner.
+Counselling rows (general + institution-specific) are visible to admins and to the matching institution's representative. **Brochure rows are admin-only** — representatives cannot see them, even for their own institution, by product decision ("only admins"). All submit responses echo `inquiry_type` so the frontend can branch.
 
 ### Resume upload
 
@@ -2631,6 +2722,7 @@ Public submit endpoints for the "Request Free Counselling" form on university an
     "inquiry_id": "uuid",
     "type": "university",
     "target_id": "uuid-of-the-target-institution",
+    "inquiry_type": "counselling",
     "status": "pending",
     "created_at": "2026-07-25T10:00:00Z"
   }
@@ -2641,6 +2733,50 @@ Public submit endpoints for the "Request Free Counselling" form on university an
 - `400` — missing required field (e.g. `phone` or `start_term`)
 - `404` — `{id}` does not match a university / college
 
+### Submit a brochure request
+
+### POST `/api/v1/universities/{id}/brochure`
+
+Public submit endpoint for the "Get the Program Brochure" form on a university detail page. The brochure form is a strict subset of the counselling form — only `full_name`, `email`, `phone`, and `program_of_interest` are required. The row is persisted with `inquiry_type='brochure'` so admins can filter brochure traffic out of the counselling moderation feed.
+
+**All auth:** public
+
+**Request body:**
+```json
+{
+  "full_name": "John Smith",
+  "email": "john@example.com",
+  "phone": "+1 (555) 000-0000",
+  "program_of_interest": "Computer Science"
+}
+```
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `full_name` | yes | 2–255 chars |
+| `email` | yes | valid email |
+| `phone` | yes | 4–50 chars |
+| `program_of_interest` | no | ≤ 255 chars |
+
+**Response 201:**
+```json
+{
+  "success": true,
+  "data": {
+    "inquiry_id": "uuid",
+    "type": "university",
+    "target_id": "uuid-of-the-university",
+    "inquiry_type": "brochure",
+    "status": "pending",
+    "created_at": "2026-07-25T10:00:00Z"
+  }
+}
+```
+
+**Errors:**
+- `400` — missing required field (e.g. `full_name`, `email`, `phone`)
+- `404` — `{id}` does not match a university
+
 ### Status workflow
 
 `pending` (default) → `reviewed` → `archived`. The PATCH endpoint accepts only `reviewed` or `archived`; once touched, a row cannot go back to `pending`. `reviewed_at` is stamped on the first transition to `reviewed` and stays set thereafter. `reviewer_id` is stamped to the calling user.
@@ -2649,7 +2785,7 @@ Public submit endpoints for the "Request Free Counselling" form on university an
 
 ### GET `/api/v1/admin/counselling`
 
-Paginated list. Admins see everything; `?type=` and `?status=` narrow the feed.
+Paginated list. Admins see everything; `?type=`, `?inquiry_type=`, and `?status=` narrow the feed.
 
 **Auth:** admin
 
@@ -2658,6 +2794,7 @@ Paginated list. Admins see everything; `?type=` and `?status=` narrow the feed.
 | Param | Type | Default | Notes |
 |-------|------|---------|-------|
 | `type` | enum | (all) | `general`, `university`, `college` |
+| `inquiry_type` | enum | (all) | `counselling`, `brochure` — separate brochure traffic from the counselling feed |
 | `status` | enum | (all) | `pending`, `reviewed`, `archived` |
 | `page` | int | 1 | |
 | `page_size` | int | 20 | max 100 |
@@ -2671,6 +2808,7 @@ Paginated list. Admins see everything; `?type=` and `?status=` narrow the feed.
       {
         "id": "uuid",
         "type": "university",
+        "inquiry_type": "counselling",
         "target_id": "uuid",
         "target_name": "Stanford University",
         "full_name": "John Smith",
@@ -2692,7 +2830,7 @@ Paginated list. Admins see everything; `?type=` and `?status=` narrow the feed.
 }
 ```
 
-General rows omit `target_id` / `target_name` and never carry `phone`/`program_of_interest`/etc.; university/college rows omit `preferred_university` / `resume_url`.
+General rows omit `target_id` / `target_name` and never carry `phone`/`program_of_interest`/etc.; university/college rows omit `preferred_university` / `resume_url`. Brochure rows have a minimal field set: `full_name`, `email`, `phone`, `program_of_interest`, `status`, `created_at`, `updated_at`.
 
 ### Get one counselling inquiry (admin)
 
@@ -2719,7 +2857,7 @@ Transition status to `reviewed` or `archived`, optionally attach a private `revi
 
 ### Representative counselling endpoints
 
-The same three operations exist under `/representative/counselling`. Representatives only see rows bound to their institution (their JWT carries `representative_university_id` or `representative_college_id`). General rows are invisible to representatives — `GET /representative/counselling?type=general` returns an empty page. Any out-of-scope read or write returns `403`.
+The same three operations exist under `/representative/counselling`. Representatives only see rows bound to their institution (their JWT carries `representative_university_id` or `representative_college_id`). General rows are invisible to representatives — `GET /representative/counselling?type=general` returns an empty page. **Brochure rows are admin-only** — representatives cannot list them, fetch them, or update them, even for their own institution. Any out-of-scope read or write returns `403`.
 
 ### GET `/api/v1/representative/counselling?status=pending&page=1`
 

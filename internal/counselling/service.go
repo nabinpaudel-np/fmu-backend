@@ -34,8 +34,9 @@ type CounsellingService interface {
 	SubmitGeneral(ctx context.Context, req *SubmitGeneralRequest) (*SubmitResponse, error)
 	SubmitUniversity(ctx context.Context, universityID string, req *SubmitSpecificRequest) (*SubmitResponse, error)
 	SubmitCollege(ctx context.Context, collegeID string, req *SubmitSpecificRequest) (*SubmitResponse, error)
+	SubmitBrochure(ctx context.Context, universityID string, req *SubmitBrochureRequest) (*SubmitResponse, error)
 	GetByID(ctx context.Context, id string) (*CounsellingListItem, error)
-	List(ctx context.Context, target TargetType, statusFilter string, q pagination.Query) ([]CounsellingListItem, int64, error)
+	List(ctx context.Context, target TargetType, inquiryType InquiryType, statusFilter string, q pagination.Query) ([]CounsellingListItem, int64, error)
 	Update(ctx context.Context, id string, req *UpdateRequest) (*CounsellingListItem, error)
 }
 
@@ -70,16 +71,18 @@ func (s *counsellingService) SubmitGeneral(ctx context.Context, req *SubmitGener
 		Country:             stringPtrOrNil(req.Country),
 		PreferredUniversity: stringPtrOrNil(req.PreferredUniversity),
 		ResumeURL:           stringPtrOrNil(req.ResumeURL),
+		InquiryType:         string(InquiryTypeCounselling),
 	})
 	if err != nil {
 		log.Default().Printf("create general counselling inquiry: %v", err)
 		return nil, err
 	}
 	return &SubmitResponse{
-		InquiryID: row.ID,
-		Type:      TargetGeneral,
-		Status:    row.Status,
-		CreatedAt: row.CreatedAt,
+		InquiryID:   row.ID,
+		Type:        TargetGeneral,
+		InquiryType: InquiryType(row.InquiryType),
+		Status:      row.Status,
+		CreatedAt:   row.CreatedAt,
 	}, nil
 }
 
@@ -109,6 +112,7 @@ func (s *counsellingService) SubmitUniversity(ctx context.Context, universityID 
 		CurrentEducation:  stringPtrOrNil(req.CurrentEducation),
 		TestScores:        stringPtrOrNil(req.TestScores),
 		Message:           stringPtrOrNil(req.Message),
+		InquiryType:       string(InquiryTypeCounselling),
 	})
 	if err != nil {
 		log.Default().Printf("create university counselling inquiry: %v", err)
@@ -143,6 +147,7 @@ func (s *counsellingService) SubmitCollege(ctx context.Context, collegeID string
 		CurrentEducation:  stringPtrOrNil(req.CurrentEducation),
 		TestScores:        stringPtrOrNil(req.TestScores),
 		Message:           stringPtrOrNil(req.Message),
+		InquiryType:       string(InquiryTypeCounselling),
 	})
 	if err != nil {
 		log.Default().Printf("create college counselling inquiry: %v", err)
@@ -151,14 +156,52 @@ func (s *counsellingService) SubmitCollege(ctx context.Context, collegeID string
 	return submitSpecificResponse(row, TargetCollege), nil
 }
 
+// SubmitBrochure handles POST /universities/{id}/brochure. The brochure
+// form is a slim subset of the counselling form — only full_name, email,
+// phone, program_of_interest — and is always tied to a single university.
+// Rows persist into counselling_inquiries with inquiry_type='brochure' so
+// admins see them in the same moderation feed, but with scope tightened
+// to admin-only (representatives cannot list or update brochure rows
+// even for their own institution).
+func (s *counsellingService) SubmitBrochure(ctx context.Context, universityID string, req *SubmitBrochureRequest) (*SubmitResponse, error) {
+	if err := s.university.GetByID(ctx, universityID); err != nil {
+		if errors.Is(err, errs.ErrNotFound) {
+			return nil, errs.ErrNotFound
+		}
+		return nil, err
+	}
+
+	targetID, err := uuidFromString(universityID)
+	if err != nil {
+		return nil, errs.ErrNotFound
+	}
+	targetType := string(TargetUniversity)
+
+	row, err := s.repo.Create(ctx, CreateParams{
+		TargetType:        &targetType,
+		TargetID:          targetID,
+		FullName:          strings.TrimSpace(req.FullName),
+		Email:             strings.TrimSpace(req.Email),
+		Phone:             stringPtrOrNil(req.Phone),
+		ProgramOfInterest: stringPtrOrNil(req.ProgramOfInterest),
+		InquiryType:       string(InquiryTypeBrochure),
+	})
+	if err != nil {
+		log.Default().Printf("create brochure inquiry: %v", err)
+		return nil, err
+	}
+	return submitSpecificResponse(row, TargetUniversity), nil
+}
+
 func submitSpecificResponse(row sqlc.CounsellingInquiry, t TargetType) *SubmitResponse {
 	targetID := uuidStringPtr(row.TargetID)
 	return &SubmitResponse{
-		InquiryID: row.ID,
-		Type:      t,
-		TargetID:  targetID,
-		Status:    row.Status,
-		CreatedAt: row.CreatedAt,
+		InquiryID:   row.ID,
+		Type:        t,
+		TargetID:    targetID,
+		InquiryType: InquiryType(row.InquiryType),
+		Status:      row.Status,
+		CreatedAt:   row.CreatedAt,
 	}
 }
 
@@ -182,27 +225,42 @@ func (s *counsellingService) GetByID(ctx context.Context, id string) (*Counselli
 	return &item, nil
 }
 
-func (s *counsellingService) List(ctx context.Context, target TargetType, statusFilter string, q pagination.Query) ([]CounsellingListItem, int64, error) {
+func (s *counsellingService) List(ctx context.Context, target TargetType, inquiryType InquiryType, statusFilter string, q pagination.Query) ([]CounsellingListItem, int64, error) {
 	if statusFilter != "" && statusFilter != StatusPending && statusFilter != StatusReviewed && statusFilter != StatusArchived {
 		return nil, 0, errs.ErrBadRequest
 	}
 	if target != "" && !target.IsValid() {
 		return nil, 0, errs.ErrBadRequest
 	}
+	if inquiryType != "" && !inquiryType.IsValid() {
+		return nil, 0, errs.ErrBadRequest
+	}
 
 	// Resolve the caller's scope. Admins have no scope (see everything).
 	// Representatives are pinned to their institution. Other roles are 403.
+	// Brochure rows are admin-only — reps cannot see them even for their
+	// own institution (per product decision: "only admins tho"). When the
+	// caller is non-admin and didn't specify inquiry_type, force it to
+	// 'counselling' so brochure rows are filtered out at the SQL level
+	// instead of leaking through the default list.
 	scopeType, scopeID, err := s.readScopeFilter(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
+	if inquiryType == InquiryTypeBrochure && scopeType != "" {
+		return []CounsellingListItem{}, 0, nil
+	}
+	if scopeType != "" && inquiryType == "" {
+		inquiryType = InquiryTypeCounselling
+	}
 
 	params := ListParams{
-		Status:     statusFilter,
-		TargetType: scopeType,
-		TargetID:   scopeID,
-		Limit:      int32(q.Limit()),
-		Offset:     int32(q.Offset()),
+		Status:      statusFilter,
+		TargetType:  scopeType,
+		TargetID:    scopeID,
+		InquiryType: string(inquiryType),
+		Limit:       int32(q.Limit()),
+		Offset:      int32(q.Offset()),
 	}
 
 	// Caller asked for a specific target filter — intersect with scope.
@@ -275,7 +333,8 @@ func (s *counsellingService) readScopeFilter(ctx context.Context) (targetType, t
 }
 
 // assertReadScope gates GetByID. Admins see anything; reps only see rows
-// attached to their own institution; general rows are admin-only.
+// attached to their own institution; general rows are admin-only; brochure
+// rows are admin-only across the board (per product: "only admins").
 func (s *counsellingService) assertReadScope(ctx context.Context, row sqlc.GetCounsellingInquiryByIDRow) error {
 	claims, err := auth.ClaimsFromContext(ctx)
 	if err != nil {
@@ -283,6 +342,9 @@ func (s *counsellingService) assertReadScope(ctx context.Context, row sqlc.GetCo
 	}
 	if claims.Role == auth.RoleAdmin {
 		return nil
+	}
+	if row.InquiryType == string(InquiryTypeBrochure) {
+		return errs.ErrForbidden
 	}
 	if claims.Role != auth.RoleRepresentative {
 		return errs.ErrForbidden

@@ -18,6 +18,7 @@ type UserService interface {
 	CreateRepresentative(ctx context.Context, fullName, email, password, universityID string) (*User, error)
 	CreateCollegeRepresentative(ctx context.Context, fullName, email, password, collegeID string) (*User, error)
 	UpdateProfile(ctx context.Context, id string, fullName, avatar *string) (*User, error)
+	UpdatePassword(ctx context.Context, id string, plaintext string) error
 }
 
 type userService struct {
@@ -112,4 +113,16 @@ func (s *userService) CreateCollegeRepresentative(ctx context.Context, fullName,
 // field before calling this.
 func (s *userService) UpdateProfile(ctx context.Context, id string, fullName, avatar *string) (*User, error) {
 	return s.userRepo.UpdateProfile(ctx, id, fullName, avatar)
+}
+
+// UpdatePassword bcrypts the plaintext and stores the resulting hash.
+// Plaintext never touches the DB and never leaves this function. Returns
+// errs.ErrUserNotFound if the user no longer exists. Used by the
+// passwordreset service after the one-time token is verified.
+func (s *userService) UpdatePassword(ctx context.Context, id string, plaintext string) error {
+	hashed, err := bcrypt.GenerateFromPassword([]byte(plaintext), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	return s.userRepo.UpdatePasswordHash(ctx, id, string(hashed))
 }

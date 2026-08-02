@@ -12,6 +12,7 @@ type TokenService interface {
 	CreateRefreshToken(ctx context.Context, userID string, userAgent string) (string, error)
 	ValidateRefreshToken(ctx context.Context, token string) (string, error)
 	DeleteByTokenHash(ctx context.Context, tokenHash string) error
+	RevokeAllForUser(ctx context.Context, userID string) error
 }
 
 type tokenService struct {
@@ -69,4 +70,8 @@ func (s *tokenService) ValidateRefreshToken(ctx context.Context, token string) (
 
 func (s *tokenService) DeleteByTokenHash(ctx context.Context, tokenHash string) error {
 	return s.tokenRepo.DeleteByTokenHash(ctx, tokenHash)
+}
+
+func (s *tokenService) RevokeAllForUser(ctx context.Context, userID string) error {
+	return s.tokenRepo.RevokeAllForUser(ctx, userID)
 }

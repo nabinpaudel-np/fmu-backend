@@ -24,6 +24,7 @@ type UserRepository interface {
 	CreateRepresentative(ctx context.Context, fullName, email, passwordHash, universityID string) (*User, error)
 	CreateCollegeRepresentative(ctx context.Context, fullName, email, passwordHash, collegeID string) (*User, error)
 	UpdateProfile(ctx context.Context, id string, fullName, avatar *string) (*User, error)
+	UpdatePasswordHash(ctx context.Context, id string, passwordHash string) error
 }
 
 type userRepository struct {
@@ -201,6 +202,22 @@ RETURNING id, full_name, avatar, email, password, oauth_provider, oauth_id, emai
 		return nil, err
 	}
 	return toDomainUser(row), nil
+}
+
+// UpdatePasswordHash overwrites the user's stored password hash. Callers are
+// responsible for bcrypt-hashing the plaintext before this call (matches how
+// the user service hashes on Create). A no-op-style return: missing id
+// surfaces as errs.ErrUserNotFound so the passwordreset service can map it
+// to a 404 instead of a silent success.
+func (r *userRepository) UpdatePasswordHash(ctx context.Context, id string, passwordHash string) error {
+	tag, err := r.pool.Exec(ctx, `UPDATE users SET password = $1, updated_at = now() WHERE id = $2`, passwordHash, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return errs.ErrUserNotFound
+	}
+	return nil
 }
 
 func toDomainUser(u sqlc.User) *User {

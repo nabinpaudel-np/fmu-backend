@@ -16,7 +16,10 @@ import (
 //go:embed templates/*.tmpl
 var templateFS embed.FS
 
-var claimApprovedTmpl = template.Must(template.ParseFS(templateFS, "templates/claim_approved.html.tmpl"))
+var (
+	claimApprovedTmpl = template.Must(template.ParseFS(templateFS, "templates/claim_approved.html.tmpl"))
+	passwordResetTmpl = template.Must(template.ParseFS(templateFS, "templates/password_reset.html.tmpl"))
+)
 
 // ClaimApprovedData feeds the claim-approved template.
 type ClaimApprovedData struct {
@@ -28,6 +31,15 @@ type ClaimApprovedData struct {
 	Role            string
 	LoginURL        string
 	FromName        string // display name in the email header/footer; defaults to c.cfg.FromName
+}
+
+// PasswordResetData feeds the password-reset template.
+type PasswordResetData struct {
+	FullName      string
+	Email         string
+	ResetURL      string
+	ExpiryMinutes int
+	FromName      string // display name in the email header/footer; defaults to c.cfg.FromName
 }
 
 type Client struct {
@@ -82,6 +94,52 @@ func (c *Client) SendClaimApproved(ctx context.Context, data ClaimApprovedData) 
 	}
 	m.SetHeader("To", data.Email)
 	m.SetHeader("Subject", fmt.Sprintf("Your %s claim has been approved", data.InstitutionType))
+	m.SetBody("text/html", buf.String())
+
+	dialer := gomail.NewDialer(c.cfg.Server, c.cfg.Port, c.cfg.Username, c.cfg.Password)
+	dialer.StartTLSPolicy = startTLSPolicy(c.cfg.StartTLS, c.cfg.SSLTLS)
+
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%w: %v", ErrSendFailed, err)
+	}
+
+	client, err := dialer.Dial()
+	if err != nil {
+		return fmt.Errorf("%w: dial: %v", ErrSendFailed, err)
+	}
+	defer client.Close()
+
+	if err := gomail.Send(client, m); err != nil {
+		return fmt.Errorf("%w: send: %v", ErrSendFailed, err)
+	}
+	return nil
+}
+
+// SendPasswordReset renders the password-reset email and ships it via SMTP.
+// ResetURL should be the absolute frontend link the user clicks (the token
+// stays out of the email body — it's the URL query string). ExpiryMinutes
+// is rounded into the body copy so the user knows the link's window.
+func (c *Client) SendPasswordReset(ctx context.Context, data PasswordResetData) error {
+	if data.FromName == "" {
+		data.FromName = c.cfg.FromName
+	}
+	if data.ExpiryMinutes <= 0 {
+		data.ExpiryMinutes = 60
+	}
+
+	var buf bytes.Buffer
+	if err := passwordResetTmpl.Execute(&buf, data); err != nil {
+		return fmt.Errorf("%w: render: %v", ErrSendFailed, err)
+	}
+
+	m := gomail.NewMessage()
+	if c.cfg.FromName != "" {
+		m.SetAddressHeader("From", c.cfg.From, c.cfg.FromName)
+	} else {
+		m.SetHeader("From", c.cfg.From)
+	}
+	m.SetHeader("To", data.Email)
+	m.SetHeader("Subject", "Reset your password")
 	m.SetBody("text/html", buf.String())
 
 	dialer := gomail.NewDialer(c.cfg.Server, c.cfg.Port, c.cfg.Username, c.cfg.Password)

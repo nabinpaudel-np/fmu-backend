@@ -101,10 +101,42 @@ func (h *CounsellingHandler) SubmitCollege(w http.ResponseWriter, r *http.Reques
 	response.Success(w, http.StatusCreated, res)
 }
 
+// SubmitBrochure handles POST /api/v1/universities/{id}/brochure. Public —
+// anyone can request a brochure, but the university must exist. The row
+// is persisted with inquiry_type='brochure' and is admin-only at the
+// moderation endpoint.
+func (h *CounsellingHandler) SubmitBrochure(w http.ResponseWriter, r *http.Request) {
+	universityID := chi.URLParam(r, "id")
+
+	var req SubmitBrochureRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := validator.Validate.Struct(&req); err != nil {
+		fields := validator.GetValidationErrors(err)
+		response.ValidationError(w, http.StatusBadRequest, fields)
+		return
+	}
+
+	res, err := h.svc.SubmitBrochure(r.Context(), universityID, &req)
+	if err != nil {
+		switch {
+		case errors.Is(err, errs.ErrNotFound):
+			response.Error(w, http.StatusNotFound, "university not found")
+		default:
+			response.Error(w, http.StatusInternalServerError, "something went wrong")
+		}
+		return
+	}
+	response.Success(w, http.StatusCreated, res)
+}
+
 // List handles GET /api/v1/admin/counselling and /api/v1/representative/counselling.
-// Admins see everything (filtered by ?type= and ?status=). Representatives
-// are silently scoped to their bound institution (the service enforces this;
-// the URL doesn't carry any scope hint).
+// Admins see everything (filtered by ?type=, ?inquiry_type=, ?status=).
+// Representatives are silently scoped to their bound institution and never
+// see brochure rows (product decision: "only admins"). The service enforces
+// this; the URL doesn't carry any scope hint.
 func (h *CounsellingHandler) List(w http.ResponseWriter, r *http.Request) {
 	q := pagination.Parse(r)
 	statusFilter := r.URL.Query().Get("status")
@@ -113,8 +145,13 @@ func (h *CounsellingHandler) List(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusBadRequest, "type must be one of: general, university, college")
 		return
 	}
+	inquiryType := InquiryType(r.URL.Query().Get("inquiry_type"))
+	if inquiryType != "" && !inquiryType.IsValid() {
+		response.Error(w, http.StatusBadRequest, "inquiry_type must be one of: counselling, brochure")
+		return
+	}
 
-	items, total, err := h.svc.List(r.Context(), target, statusFilter, q)
+	items, total, err := h.svc.List(r.Context(), target, inquiryType, statusFilter, q)
 	if err != nil {
 		switch {
 		case errors.Is(err, errs.ErrBadRequest):

@@ -32,6 +32,9 @@ var (
 	ErrRepCannotChangeNameOrSlug          = errors.New("representatives cannot change name or slug")
 	ErrProgramDegreeNotFound              = errors.New("degree does not exist")
 	ErrPublishMissingFields               = errors.New("missing required fields for publish")
+	ErrInvalidPasswordResetToken          = errors.New("invalid password reset token")
+	ErrPasswordResetTokenExpired          = errors.New("password reset token has expired")
+	ErrPasswordResetTokenUsed             = errors.New("password reset token has already been used")
 )
 
 // InvalidReferencesError is returned when one or more UUIDs in a request

@@ -23,6 +23,7 @@ import (
 	"fmu-backend/internal/favorites"
 	"fmu-backend/internal/mail"
 	"fmu-backend/internal/oauth"
+	"fmu-backend/internal/passwordreset"
 	"fmu-backend/internal/programs"
 	"fmu-backend/internal/supabase"
 	"fmu-backend/internal/token"
@@ -148,6 +149,10 @@ func main() {
 	uploadsSvc := uploads.NewService(cld, supa, cfg.Supabase.DocsBucket)
 	uploadsHandler := uploads.NewHandler(uploadsSvc)
 
+	resetRepo := passwordreset.NewRepository(queries)
+	resetSvc := passwordreset.NewService(resetRepo, userSvc, tokenSvc, mailer, cfg, nil)
+	resetHandler := passwordreset.NewHandler(resetSvc, cfg)
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -179,6 +184,7 @@ func main() {
 	claim.RegisterRoutes(r, claimHandler, authMW, adminMW, optionalAuthMW)
 	counselling.RegisterRoutes(r, counsellingHandler, authMW, adminMW, adminOrRepMW)
 	programs.RegisterRoutes(r, programsHandler, authMW, adminMW)
+	passwordreset.RegisterRoutes(r, resetHandler)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,
