@@ -17,6 +17,7 @@ type UserService interface {
 	CreateWithOAuth(ctx context.Context, fullName, email, provider, providerID, avatar string) (*User, error)
 	CreateRepresentative(ctx context.Context, fullName, email, password, universityID string) (*User, error)
 	CreateCollegeRepresentative(ctx context.Context, fullName, email, password, collegeID string) (*User, error)
+	UpdateProfile(ctx context.Context, id string, fullName, avatar *string) (*User, error)
 }
 
 type userService struct {
@@ -103,4 +104,12 @@ func (s *userService) CreateCollegeRepresentative(ctx context.Context, fullName,
 		return nil, err
 	}
 	return user, nil
+}
+
+// UpdateProfile patches the user's editable profile fields (full_name,
+// avatar). Email is deliberately not in the signature — it's not
+// self-serviceable. The handler rejects requests that include the email
+// field before calling this.
+func (s *userService) UpdateProfile(ctx context.Context, id string, fullName, avatar *string) (*User, error) {
+	return s.userRepo.UpdateProfile(ctx, id, fullName, avatar)
 }

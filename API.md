@@ -511,6 +511,71 @@ curl -b cookies.txt http://localhost:3000/api/v1/auth/me
 
 ---
 
+### PATCH `/api/v1/auth/me`
+
+Update the currently-authenticated user's own profile. Any logged-in user (admin, representative, student) may edit their own `full_name` and/or `avatar`. **Email cannot be changed through this endpoint** — a request that includes an `email` key returns `400`. Users who need to change their email must contact FMU admin directly.
+
+The user id is always read from the JWT, never from the URL, so a token holder can only ever edit their own profile.
+
+**Auth:** required (must have a valid `access_token` cookie)
+
+**Request body:** pointer types mean:
+- **Omit the field** → unchanged in the database.
+- **Send `null`** → also leaves the value unchanged (JSON `null` decodes to a nil pointer in Go).
+- **Send a value** → that value replaces the existing one.
+
+| Field       | Type   | Notes                                                                                     |
+|-------------|--------|-------------------------------------------------------------------------------------------|
+| `full_name` | string | optional, 2–255 chars                                                                     |
+| `avatar`    | string | optional, valid URL (≤500 chars). Get the URL from `/api/v1/uploads/sign` with `purpose=avatar` and uploading to Cloudinary first — same flow as logos. |
+| `email`     | —      | Not accepted. Including this field returns `400`.                                         |
+
+**Example — change name only:**
+```json
+{ "full_name": "Ada Lovelace" }
+```
+
+**Example — change avatar only:**
+```json
+{ "avatar": "https://res.cloudinary.com/<cloud>/image/upload/.../avatar/abc.jpg" }
+```
+
+**Example — change both at once:**
+```json
+{
+  "full_name": "Ada Lovelace",
+  "avatar":    "https://res.cloudinary.com/<cloud>/image/upload/.../avatar/abc.jpg"
+}
+```
+
+**Response:** `200 OK` — same shape as `GET /auth/me`. Returns the freshly-read user record so the frontend can replace its cached user state in one round-trip.
+```json
+{
+  "success": true,
+  "data": {
+    "user_id":   "d3b07384-d9a2-4e0a-b71e-1c9f3e3e0a1b",
+    "full_name": "Ada Lovelace",
+    "email":     "ada@example.com",
+    "avatar":    "https://res.cloudinary.com/<cloud>/image/upload/.../avatar/abc.jpg",
+    "role":      "student"
+  }
+}
+```
+
+**Errors:**
+- `400` — request body contains `email` (rejected with message "email cannot be changed via this endpoint; contact FMU admin to update your email"), validation failed (e.g. `full_name` too short, `avatar` not a URL), or body is malformed JSON
+- `401` — no `access_token` cookie, or it's invalid/expired
+- `404` — user referenced by the JWT no longer exists in the database
+
+**Curl example:**
+```bash
+curl -b cookies.txt -X PATCH http://localhost:3000/api/v1/auth/me \
+  -H "Content-Type: application/json" \
+  -d '{"full_name":"Ada Lovelace","avatar":"https://res.cloudinary.com/<cloud>/image/upload/.../avatar/abc.jpg"}'
+```
+
+---
+
 ## University endpoints
 
 Reads are public. Creating a university is admin-only; updating allows an admin or the representative bound to that university.
@@ -1845,18 +1910,27 @@ This split keeps Cloudinary's image-optimization features (transformations, form
 
 Each purpose (`logo`, `cover`, `gallery`) maps to a Cloudinary folder: `fmu/{APP_ENV}/{purpose}/`. Files auto-receive a unique filename on Cloudinary's side; overwrite is disabled. Claim proofs use the Supabase flow described below.
 
+The `avatar` purpose follows the same shape — `purpose: "avatar"` puts the file in `fmu/{APP_ENV}/avatar/`. It's available to any authenticated user (admin, representative, student) for their own profile picture, but a user can only upload against their own user id (which is implicit — there's no URL param to bind it to). To finish, PATCH the returned `secure_url` to `/api/v1/auth/me` as the `avatar` field.
+
 ### POST `/api/v1/uploads/sign`
 
 Returns a one-shot signed-upload payload. Send it (along with the file) directly to Cloudinary — the backend never proxies the bytes.
 
-**Auth:** admin or representative.
+**Auth:** any authenticated user. The server enforces a role × purpose matrix:
+
+| `purpose` | Allowed roles                       |
+|-----------|-------------------------------------|
+| `logo`, `cover`, `gallery` | `admin`, `representative` |
+| `avatar`                   | `admin`, `representative`, `student` |
+
+A student trying to sign a `logo` upload gets `403`. Avatars are the only purpose available to students.
 
 **Request body:**
 ```json
 { "purpose": "logo" }
 ```
 
-`purpose` must be one of `logo`, `cover`, `gallery`. All signed uploads use Cloudinary's `image` resource type; claim proofs are uploaded through Supabase using [`POST /api/v1/uploads/document`](#post-apiv1uploadsdocument).
+`purpose` must be one of `logo`, `cover`, `gallery`, `avatar`. All signed uploads use Cloudinary's `image` resource type; claim proofs are uploaded through Supabase using [`POST /api/v1/uploads/document`](#post-apiv1uploadsdocument).
 
 **Response:** `200 OK`
 ```json
@@ -1902,17 +1976,17 @@ Pass `secure_url` into the corresponding field on `POST /api/v1/universities`.
 **Errors:**
 - `400` — `purpose` missing or not in allowlist
 - `401` — missing/invalid session cookie
-- `403` — role is not `admin`
+- `403` — role is not allowed for the requested `purpose` (e.g. student requesting `logo`)
 - `500` — Cloudinary client not configured (missing `CLOUDINARY_*` env vars in non-dev)
 
 ### POST `/api/v1/uploads/image`
 
 Optional server-side fallback for clients that cannot reach Cloudinary directly. Streams a multipart `file` to Cloudinary from the backend.
 
-**Auth:** admin or representative.
+**Auth:** any authenticated user, with the same role × purpose matrix as [`/sign`](#post-apiv1uploadssign).
 
 **Query parameters:**
-- `purpose` (required) — one of `logo`, `cover`, `gallery`
+- `purpose` (required) — one of `logo`, `cover`, `gallery`, `avatar`
 
 **Request body:** `multipart/form-data` with a single `file` field. Max 10 MiB. Allowlisted MIMEs: `image/jpeg`, `image/png`, `image/webp`, `image/gif`. Mime is detected from the first 512 bytes (form headers are not trusted).
 

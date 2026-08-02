@@ -59,7 +59,7 @@ func main() {
 
 	queries := sqlc.New(pool)
 
-	userRepo := user.NewUserRepository(queries)
+	userRepo := user.NewUserRepository(queries, pool)
 	userSvc := user.NewUserService(userRepo)
 	tokenRepo := token.NewTokenRepository(pool)
 	tokenSvc := token.NewTokenService(tokenRepo, cfg)
@@ -173,7 +173,7 @@ func main() {
 
 	auth.RegisterRoutes(r, authHandler, authMW)
 	university.RegisterRoutes(r, universityHandler, authMW, adminMW, optionalAuthMW)
-	uploads.RegisterRoutes(r, uploadsHandler, authMW, adminOrRepMW)
+	uploads.RegisterRoutes(r, uploadsHandler, authMW)
 	college.RegisterRoutes(r, collegeHandler, authMW, adminMW, adminOrRepMW, optionalAuthMW)
 	favorites.RegisterRoutes(r, favoritesHandler, authMW, studentMW)
 	claim.RegisterRoutes(r, claimHandler, authMW, adminMW, optionalAuthMW)

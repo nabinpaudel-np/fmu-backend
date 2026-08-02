@@ -1,14 +1,18 @@
 package uploads
 
 // allowed purpose values for /sign — frontend passes one of these to
+// get Cloudinary signing params (or to /image for a direct upload).
+// `avatar` is for the user's own profile picture; the other three are
+// branding assets attached to a university/college.
 var AllowedPurposes = map[string]struct{}{
 	"logo":    {},
 	"cover":   {},
 	"gallery": {},
+	"avatar":  {},
 }
 
 type SignUploadRequest struct {
-	Purpose string `json:"purpose" validate:"required,oneof=logo cover gallery"`
+	Purpose string `json:"purpose" validate:"required,oneof=logo cover gallery avatar"`
 }
 
 type SignUploadResponse struct {

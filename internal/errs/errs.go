@@ -27,6 +27,7 @@ var (
 	ErrUniversityAlreadyHasRepresentative = errors.New("university already has a representative")
 	ErrCollegeAlreadyHasRepresentative    = errors.New("college already has a representative")
 	ErrClaimRoleNotAllowed                = errors.New("only non-student, non-admin users may submit a claim")
+	ErrEmailCannotBeChanged               = errors.New("email cannot be changed via this endpoint; contact FMU admin to update your email")
 	ErrRepOutOfScope                      = errors.New("representative can only edit their own university")
 	ErrRepCannotChangeNameOrSlug          = errors.New("representatives cannot change name or slug")
 	ErrProgramDegreeNotFound              = errors.New("degree does not exist")
