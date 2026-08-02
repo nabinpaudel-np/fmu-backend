@@ -3,11 +3,16 @@ package user
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"fmu-backend/internal/db/sqlc"
+	"fmu-backend/internal/errs"
 )
 
 type UserRepository interface {
@@ -18,15 +23,18 @@ type UserRepository interface {
 	CreateWithOAuth(ctx context.Context, fullName, email, provider, providerID, avatar string) (*User, error)
 	CreateRepresentative(ctx context.Context, fullName, email, passwordHash, universityID string) (*User, error)
 	CreateCollegeRepresentative(ctx context.Context, fullName, email, passwordHash, collegeID string) (*User, error)
+	UpdateProfile(ctx context.Context, id string, fullName, avatar *string) (*User, error)
 }
 
 type userRepository struct {
 	queries *sqlc.Queries
+	pool    *pgxpool.Pool
 }
 
-func NewUserRepository(queries *sqlc.Queries) UserRepository {
+func NewUserRepository(queries *sqlc.Queries, pool *pgxpool.Pool) UserRepository {
 	return &userRepository{
 		queries: queries,
+		pool:    pool,
 	}
 }
 
@@ -114,6 +122,82 @@ func (r *userRepository) CreateCollegeRepresentative(ctx context.Context, fullNa
 		RepresentativeCollegeID: uuidFromString(collegeID),
 	})
 	if err != nil {
+		return nil, err
+	}
+	return toDomainUser(row), nil
+}
+
+// UpdateProfile patches the user's full_name and/or avatar. Email is
+// intentionally NOT settable here — users must contact an admin to change
+// their email. The handler rejects requests that include the email field
+// before reaching this method.
+//
+// Hand-written SQL matches the partial-update pattern used by the
+// university repository: build a dynamic SET clause from non-nil pointers
+// and RETURN the row in scan order. RETURNING lists columns in the order
+// the rows physically come back from the database (not SELECT *), because
+// migrations have appended fields after the original CREATE TABLE.
+func (r *userRepository) UpdateProfile(ctx context.Context, id string, fullName, avatar *string) (*User, error) {
+	if fullName == nil && avatar == nil {
+		return r.GetByID(ctx, id)
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback(ctx)
+		}
+	}()
+
+	sets := []string{}
+	args := []any{}
+	addSet := func(col string, val any) {
+		args = append(args, val)
+		sets = append(sets, fmt.Sprintf("%s = $%d", col, len(args)))
+	}
+	if fullName != nil {
+		addSet("full_name", *fullName)
+	}
+	if avatar != nil {
+		addSet("avatar", *avatar)
+	}
+	sets = append(sets, "updated_at = now()")
+	args = append(args, id)
+
+	sql := fmt.Sprintf(`UPDATE users SET %s WHERE id = $%d
+RETURNING id, full_name, avatar, email, password, oauth_provider, oauth_id, email_verified, created_at, updated_at, role, representative_university_id, representative_college_id`,
+		strings.Join(sets, ", "), len(args))
+
+	row := sqlc.User{}
+	err = tx.QueryRow(ctx, sql, args...).Scan(
+		&row.ID,
+		&row.FullName,
+		&row.Avatar,
+		&row.Email,
+		&row.Password,
+		&row.Provider,
+		&row.ProviderID,
+		&row.EmailVerified,
+		&row.CreatedAt,
+		&row.UpdatedAt,
+		&row.Role,
+		&row.RepresentativeUniversityID,
+		&row.RepresentativeCollegeID,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errs.ErrUserNotFound
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "22P02" {
+			return nil, errs.ErrUserNotFound
+		}
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
 	return toDomainUser(row), nil

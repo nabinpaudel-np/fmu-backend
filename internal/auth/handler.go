@@ -204,6 +204,47 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	response.Success(w, http.StatusOK, res)
 }
 
+// UpdateMe patches the authenticated user's own profile (full_name and
+// avatar). Email is not accepted in the body — PatchProfileRequest's
+// UnmarshalJSON returns an error if `email` is present, and the validator
+// catches anything else. The user id always comes from the JWT, never
+// the URL, so a token holder can only ever edit their own profile.
+func (h *AuthHandler) UpdateMe(w http.ResponseWriter, r *http.Request) {
+	claims, err := ClaimsFromContext(r.Context())
+	if err != nil {
+		response.Error(w, http.StatusUnauthorized, errs.ErrUnauthorized.Error())
+		return
+	}
+
+	var req PatchProfileRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err.Error() == errs.ErrEmailCannotBeChanged.Error() {
+			response.Error(w, http.StatusBadRequest, errs.ErrEmailCannotBeChanged.Error())
+			return
+		}
+		response.Error(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := validator.Validate.Struct(&req); err != nil {
+		validationErrors := validator.GetValidationErrors(err)
+		response.ValidationError(w, http.StatusBadRequest, validationErrors)
+		return
+	}
+
+	res, err := h.authService.UpdateProfile(r.Context(), claims.UserID, &req)
+	if err != nil {
+		if errors.Is(err, errs.ErrUserNotFound) {
+			response.Error(w, http.StatusNotFound, "user not found")
+			return
+		}
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+
+	response.Success(w, http.StatusOK, res)
+}
+
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	refreshToken := GetRefreshCookie(r)
 

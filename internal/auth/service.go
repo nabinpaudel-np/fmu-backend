@@ -19,6 +19,7 @@ type AuthService interface {
 	GetGoogleAuthURL(state string) string
 	FrontendURL() string
 	Me(ctx context.Context, userID string) (*MeResponse, error)
+	UpdateProfile(ctx context.Context, userID string, req *PatchProfileRequest) (*MeResponse, error)
 	Logout(ctx context.Context, refreshToken string) error
 }
 
@@ -168,6 +169,46 @@ func (s *authService) Me(ctx context.Context, userID string) (*MeResponse, error
 		RepresentativeUniversityID: repUniID,
 		RepresentativeCollegeID:    repCollegeID,
 	}, nil
+}
+
+// UpdateProfile patches the authenticated user's full_name and/or avatar.
+// Email changes are intentionally not supported — the request DTO rejects
+// any body containing an `email` key before reaching this method.
+func (s *authService) UpdateProfile(ctx context.Context, userID string, req *PatchProfileRequest) (*MeResponse, error) {
+	u, err := s.userService.UpdateProfile(ctx, userID, req.FullName, req.Avatar)
+	if err != nil {
+		return nil, err
+	}
+	if u == nil {
+		return nil, errs.ErrUserNotFound
+	}
+	return s.toMeResponse(u), nil
+}
+
+// toMeResponse projects the domain User into the public MeResponse shape,
+// filling in empty strings for the pointer fields that don't apply.
+func (s *authService) toMeResponse(u *user.User) *MeResponse {
+	avatar := ""
+	if u.Avatar != nil {
+		avatar = *u.Avatar
+	}
+	repUniID := ""
+	if u.RepresentativeUniversityID != nil {
+		repUniID = *u.RepresentativeUniversityID
+	}
+	repCollegeID := ""
+	if u.RepresentativeCollegeID != nil {
+		repCollegeID = *u.RepresentativeCollegeID
+	}
+	return &MeResponse{
+		UserID:                     u.ID,
+		FullName:                   u.FullName,
+		Email:                      u.Email,
+		Avatar:                     avatar,
+		Role:                       u.Role,
+		RepresentativeUniversityID: repUniID,
+		RepresentativeCollegeID:    repCollegeID,
+	}
 }
 
 func (s *authService) GetGoogleAuthURL(state string) string {

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"fmu-backend/internal/auth"
 	"fmu-backend/internal/cloudinary"
 	"fmu-backend/internal/response"
 	"fmu-backend/internal/supabase"
@@ -31,8 +32,24 @@ var allowedDocumentMimes = map[string]struct{}{
 
 func isImagePurpose(p string) bool {
 	switch p {
-	case "logo", "cover", "gallery":
+	case "logo", "cover", "gallery", "avatar":
 		return true
+	}
+	return false
+}
+
+// purposeAllowedForRole decides which roles may upload for a given purpose.
+// Branding assets (logo/cover/gallery) belong to a university/college and
+// only admins or the bound representative may upload them. Avatars are
+// personal — any authenticated user (admin, rep, student) may upload their
+// own. Without this check, a student could mint signed Cloudinary uploads
+// into the `logo` folder without owning a university.
+func purposeAllowedForRole(role, purpose string) bool {
+	switch purpose {
+	case "logo", "cover", "gallery":
+		return role == auth.RoleAdmin || role == auth.RoleRepresentative
+	case "avatar":
+		return role == auth.RoleAdmin || role == auth.RoleRepresentative || role == auth.RoleStudent
 	}
 	return false
 }
@@ -60,6 +77,12 @@ func (h *UploadsHandler) Sign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	claims, err := auth.ClaimsFromContext(r.Context())
+	if err != nil || !purposeAllowedForRole(claims.Role, req.Purpose) {
+		response.Error(w, http.StatusForbidden, "your role may not upload for this purpose")
+		return
+	}
+
 	payload, err := h.svc.Sign(r.Context(), req)
 	if err != nil {
 		if errors.Is(err, ErrInvalidPurpose) {
@@ -75,7 +98,13 @@ func (h *UploadsHandler) Sign(w http.ResponseWriter, r *http.Request) {
 func (h *UploadsHandler) UploadImage(w http.ResponseWriter, r *http.Request) {
 	purpose := r.URL.Query().Get("purpose")
 	if !isImagePurpose(purpose) {
-		response.Error(w, http.StatusBadRequest, "query parameter 'purpose' must be one of: logo, cover, gallery")
+		response.Error(w, http.StatusBadRequest, "query parameter 'purpose' must be one of: logo, cover, gallery, avatar")
+		return
+	}
+
+	claims, err := auth.ClaimsFromContext(r.Context())
+	if err != nil || !purposeAllowedForRole(claims.Role, purpose) {
+		response.Error(w, http.StatusForbidden, "your role may not upload for this purpose")
 		return
 	}
 

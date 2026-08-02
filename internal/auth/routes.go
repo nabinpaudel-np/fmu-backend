@@ -15,4 +15,5 @@ func RegisterRoutes(r chi.Router, h *AuthHandler, authMW func(http.Handler) http
 	r.Delete("/api/v1/auth/logout", h.Logout)
 
 	r.With(authMW).Get("/api/v1/auth/me", h.Me)
+	r.With(authMW).Patch("/api/v1/auth/me", h.UpdateMe)
 }

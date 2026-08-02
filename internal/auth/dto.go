@@ -1,6 +1,12 @@
 package auth
 
-import "time"
+import (
+	"encoding/json"
+	"errors"
+	"time"
+
+	"fmu-backend/internal/errs"
+)
 
 type (
 	RegisterRequest struct {
@@ -63,4 +69,34 @@ type MeResponse struct {
 	Role                       string `json:"role" example:"student"`
 	RepresentativeUniversityID string `json:"representative_university_id,omitempty" example:"d3b07384-d9a2-4e0a-b71e-1c9f3e3e0a1b"`
 	RepresentativeCollegeID    string `json:"representative_college_id,omitempty" example:"c2f5a1e0-3b6d-4f8e-9c2a-1d4e7f8b9a0b"`
+}
+
+// PatchProfileRequest is the body for PATCH /api/v1/auth/me. All fields are
+// optional — pointer types let us distinguish "omit" (no change) from "send
+// the zero value" (explicit update). Avatar URLs should come from
+// /api/v1/uploads/sign + Cloudinary upload, the same flow logos use.
+type PatchProfileRequest struct {
+	FullName *string `json:"full_name,omitempty" validate:"omitempty,min=2,max=255" example:"Ada Lovelace"`
+	Avatar   *string `json:"avatar,omitempty"   validate:"omitempty,url,max=500"      example:"https://res.cloudinary.com/<cloud>/image/upload/.../avatar/abc.jpg"`
+}
+
+// UnmarshalJSON rejects the request entirely if the body contains an
+// `email` key. Email is not self-serviceable — users must contact an
+// admin to change it, so we fail loud rather than silently dropping the
+// field and confusing the caller.
+func (r *PatchProfileRequest) UnmarshalJSON(data []byte) error {
+	type alias PatchProfileRequest
+	aux := &struct {
+		Email *string `json:"email,omitempty"`
+		*alias
+	}{
+		alias: (*alias)(r),
+	}
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	if aux.Email != nil {
+		return errors.New(errs.ErrEmailCannotBeChanged.Error())
+	}
+	return nil
 }
