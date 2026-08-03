@@ -21,26 +21,36 @@ WHERE (NULLIF($1, '') IS NULL OR status = $1)
      OR ($2 <> '__general__' AND target_type = $2
             AND (NULLIF($3, '') IS NULL OR target_id::text = $3))
   )
+  AND (NULLIF($4, '') IS NULL OR inquiry_type = $4)
 `
 
 type CountCounsellingInquiriesParams struct {
 	Column1 interface{}
 	Column2 interface{}
 	Column3 interface{}
+	Column4 interface{}
 }
 
-// Filter contract for the target dimension ($2, $3):
+// Filter contract:
 //
-//	$2 NULL or ''                        → no target filter, match anything
-//	$2 = '__general__'                   → only general rows (target_type IS NULL)
-//	$2 = 'university' | 'college'        → match that target_type, optionally
-//	                                       narrowed by target_id ($3)
+//	$1 status           NULL or '' → no status filter;   otherwise equality
+//	$2 target_type      NULL or '' → no target filter;  '__general__' → IS NULL;
+//	                     'university' | 'college'        → that target_type, optionally
+//	                                                      narrowed by target_id ($3)
+//	$3 target_id        empty → no id narrowing;         otherwise equality on target_id
+//	$4 inquiry_type     NULL or '' → no filter;          'counselling' | 'brochure'
+//	                                                      → equality match
 //
-// We use NULLIF on $2 and $3 because sqlc hands us string params and Go's
-// empty string ("") is not the same as SQL NULL — without NULLIF the "no
-// filter" case would compare target_type to ” and match nothing.
+// We use NULLIF because sqlc hands us string params and Go's empty string
+// ("") is not the same as SQL NULL — without NULLIF the "no filter" cases
+// would compare equality against ” and match nothing.
 func (q *Queries) CountCounsellingInquiries(ctx context.Context, arg CountCounsellingInquiriesParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countCounsellingInquiries, arg.Column1, arg.Column2, arg.Column3)
+	row := q.db.QueryRow(ctx, countCounsellingInquiries,
+		arg.Column1,
+		arg.Column2,
+		arg.Column3,
+		arg.Column4,
+	)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -50,13 +60,15 @@ const createCounsellingInquiry = `-- name: CreateCounsellingInquiry :one
 INSERT INTO counselling_inquiries (
     target_type, target_id, full_name, email, phone, country,
     preferred_university, program_of_interest, start_term,
-    current_education, test_scores, message, resume_url
+    current_education, test_scores, message, resume_url,
+    inquiry_type
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9,
-    $10, $11, $12, $13
+    $10, $11, $12, $13,
+    $14
 )
-RETURNING id, target_type, target_id, full_name, email, phone, country, preferred_university, program_of_interest, start_term, current_education, test_scores, message, resume_url, status, reviewer_id, reviewed_at, review_note, created_at, updated_at
+RETURNING id, target_type, target_id, full_name, email, phone, country, preferred_university, program_of_interest, start_term, current_education, test_scores, message, resume_url, status, inquiry_type, reviewer_id, reviewed_at, review_note, created_at, updated_at
 `
 
 type CreateCounsellingInquiryParams struct {
@@ -73,6 +85,7 @@ type CreateCounsellingInquiryParams struct {
 	TestScores          *string
 	Message             *string
 	ResumeUrl           *string
+	InquiryType         string
 }
 
 func (q *Queries) CreateCounsellingInquiry(ctx context.Context, arg CreateCounsellingInquiryParams) (CounsellingInquiry, error) {
@@ -90,6 +103,7 @@ func (q *Queries) CreateCounsellingInquiry(ctx context.Context, arg CreateCounse
 		arg.TestScores,
 		arg.Message,
 		arg.ResumeUrl,
+		arg.InquiryType,
 	)
 	var i CounsellingInquiry
 	err := row.Scan(
@@ -108,6 +122,7 @@ func (q *Queries) CreateCounsellingInquiry(ctx context.Context, arg CreateCounse
 		&i.Message,
 		&i.ResumeUrl,
 		&i.Status,
+		&i.InquiryType,
 		&i.ReviewerID,
 		&i.ReviewedAt,
 		&i.ReviewNote,
@@ -123,7 +138,7 @@ SELECT
     ci.phone, ci.country, ci.preferred_university,
     ci.program_of_interest, ci.start_term, ci.current_education,
     ci.test_scores, ci.message, ci.resume_url,
-    ci.status, ci.reviewer_id, ci.reviewed_at, ci.review_note,
+    ci.status, ci.inquiry_type, ci.reviewer_id, ci.reviewed_at, ci.review_note,
     ci.created_at, ci.updated_at,
     COALESCE(u.name, co.name, '') AS target_name
 FROM counselling_inquiries ci
@@ -150,6 +165,7 @@ type GetCounsellingInquiryByIDRow struct {
 	Message             *string
 	ResumeUrl           *string
 	Status              string
+	InquiryType         string
 	ReviewerID          pgtype.UUID
 	ReviewedAt          pgtype.Timestamptz
 	ReviewNote          *string
@@ -180,6 +196,7 @@ func (q *Queries) GetCounsellingInquiryByID(ctx context.Context, id string) (Get
 		&i.Message,
 		&i.ResumeUrl,
 		&i.Status,
+		&i.InquiryType,
 		&i.ReviewerID,
 		&i.ReviewedAt,
 		&i.ReviewNote,
@@ -196,7 +213,7 @@ SELECT
     ci.phone, ci.country, ci.preferred_university,
     ci.program_of_interest, ci.start_term, ci.current_education,
     ci.test_scores, ci.message, ci.resume_url,
-    ci.status, ci.reviewer_id, ci.reviewed_at, ci.review_note,
+    ci.status, ci.inquiry_type, ci.reviewer_id, ci.reviewed_at, ci.review_note,
     ci.created_at, ci.updated_at,
     COALESCE(u.name, co.name, '') AS target_name
 FROM counselling_inquiries ci
@@ -211,14 +228,16 @@ WHERE (NULLIF($1, '') IS NULL OR ci.status = $1)
      OR ($2 <> '__general__' AND ci.target_type = $2
             AND (NULLIF($3, '') IS NULL OR ci.target_id::text = $3))
   )
+  AND (NULLIF($4, '') IS NULL OR ci.inquiry_type = $4)
 ORDER BY ci.created_at DESC
-LIMIT $4 OFFSET $5
+LIMIT $5 OFFSET $6
 `
 
 type ListCounsellingInquiriesParams struct {
 	Column1 interface{}
 	Column2 interface{}
 	Column3 interface{}
+	Column4 interface{}
 	Limit   int32
 	Offset  int32
 }
@@ -239,6 +258,7 @@ type ListCounsellingInquiriesRow struct {
 	Message             *string
 	ResumeUrl           *string
 	Status              string
+	InquiryType         string
 	ReviewerID          pgtype.UUID
 	ReviewedAt          pgtype.Timestamptz
 	ReviewNote          *string
@@ -253,6 +273,7 @@ func (q *Queries) ListCounsellingInquiries(ctx context.Context, arg ListCounsell
 		arg.Column1,
 		arg.Column2,
 		arg.Column3,
+		arg.Column4,
 		arg.Limit,
 		arg.Offset,
 	)
@@ -279,6 +300,7 @@ func (q *Queries) ListCounsellingInquiries(ctx context.Context, arg ListCounsell
 			&i.Message,
 			&i.ResumeUrl,
 			&i.Status,
+			&i.InquiryType,
 			&i.ReviewerID,
 			&i.ReviewedAt,
 			&i.ReviewNote,
@@ -304,7 +326,7 @@ SET status = $2,
     review_note = $5,
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, target_type, target_id, full_name, email, phone, country, preferred_university, program_of_interest, start_term, current_education, test_scores, message, resume_url, status, reviewer_id, reviewed_at, review_note, created_at, updated_at
+RETURNING id, target_type, target_id, full_name, email, phone, country, preferred_university, program_of_interest, start_term, current_education, test_scores, message, resume_url, status, inquiry_type, reviewer_id, reviewed_at, review_note, created_at, updated_at
 `
 
 type UpdateCounsellingStatusParams struct {
@@ -343,6 +365,7 @@ func (q *Queries) UpdateCounsellingStatus(ctx context.Context, arg UpdateCounsel
 		&i.Message,
 		&i.ResumeUrl,
 		&i.Status,
+		&i.InquiryType,
 		&i.ReviewerID,
 		&i.ReviewedAt,
 		&i.ReviewNote,

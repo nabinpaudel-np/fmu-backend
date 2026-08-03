@@ -13,6 +13,7 @@ type TokenRepository interface {
 	Create(ctx context.Context, userID, tokenHash, userAgent string, expiresAt time.Time) error
 	GetByTokenHash(ctx context.Context, tokenHash string) (*RefreshToken, error)
 	DeleteByTokenHash(ctx context.Context, tokenHash string) error
+	RevokeAllForUser(ctx context.Context, userID string) error
 }
 
 type tokenRepository struct {
@@ -68,5 +69,13 @@ func (r *tokenRepository) DeleteByTokenHash(ctx context.Context, tokenHash strin
 	WHERE token = $1
 	`
 	_, err := r.db.Exec(ctx, query, tokenHash)
+	return err
+}
+
+// RevokeAllForUser flips revoked=true on every refresh token for the user.
+// Called from the password-reset path so a password change invalidates
+// sessions on every device. Idempotent — calling twice is harmless.
+func (r *tokenRepository) RevokeAllForUser(ctx context.Context, userID string) error {
+	_, err := r.db.Exec(ctx, `UPDATE refresh_tokens SET revoked = true WHERE user_id = $1 AND revoked = false`, userID)
 	return err
 }

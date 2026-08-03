@@ -16,15 +16,17 @@ import (
 //	POST /api/v1/counselling/general
 //	POST /api/v1/counselling/universities/{id}
 //	POST /api/v1/counselling/colleges/{id}
+//	POST /api/v1/universities/{id}/brochure
 //	POST /api/v1/uploads/resume  (registered in the uploads package)
 //
 // Admin:
 //
-//	GET    /api/v1/admin/counselling?type=general|university|college&status=pending|reviewed|archived
+//	GET    /api/v1/admin/counselling?type=general|university|college&inquiry_type=counselling|brochure&status=pending|reviewed|archived
 //	GET    /api/v1/admin/counselling/{id}
 //	PATCH  /api/v1/admin/counselling/{id}
 //
-// Representative (scoped to their institution by the service):
+// Representative (scoped to their institution by the service; brochure
+// rows are admin-only):
 //
 //	GET    /api/v1/representative/counselling
 //	GET    /api/v1/representative/counselling/{id}
@@ -40,6 +42,10 @@ func RegisterRoutes(
 	r.Post("/api/v1/counselling/general", h.SubmitGeneral)
 	r.Post("/api/v1/counselling/universities/{id}", h.SubmitUniversity)
 	r.Post("/api/v1/counselling/colleges/{id}", h.SubmitCollege)
+	// Brochure requests share the counselling moderation feed but live
+	// under the university URL prefix for the public form. The service
+	// stamps inquiry_type='brochure' so the admin feed can surface them.
+	r.Post("/api/v1/universities/{id}/brochure", h.SubmitBrochure)
 
 	// Admin moderation. authMW must come BEFORE adminMW so the JWT is
 	// parsed and claims are injected into context — RequireRole reads

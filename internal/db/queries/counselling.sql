@@ -2,11 +2,13 @@
 INSERT INTO counselling_inquiries (
     target_type, target_id, full_name, email, phone, country,
     preferred_university, program_of_interest, start_term,
-    current_education, test_scores, message, resume_url
+    current_education, test_scores, message, resume_url,
+    inquiry_type
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9,
-    $10, $11, $12, $13
+    $10, $11, $12, $13,
+    $14
 )
 RETURNING *;
 
@@ -19,7 +21,7 @@ SELECT
     ci.phone, ci.country, ci.preferred_university,
     ci.program_of_interest, ci.start_term, ci.current_education,
     ci.test_scores, ci.message, ci.resume_url,
-    ci.status, ci.reviewer_id, ci.reviewed_at, ci.review_note,
+    ci.status, ci.inquiry_type, ci.reviewer_id, ci.reviewed_at, ci.review_note,
     ci.created_at, ci.updated_at,
     COALESCE(u.name, co.name, '') AS target_name
 FROM counselling_inquiries ci
@@ -30,15 +32,18 @@ LEFT JOIN colleges co
 WHERE ci.id = $1;
 
 -- name: CountCounsellingInquiries :one
--- Filter contract for the target dimension ($2, $3):
---   $2 NULL or ''                        → no target filter, match anything
---   $2 = '__general__'                   → only general rows (target_type IS NULL)
---   $2 = 'university' | 'college'        → match that target_type, optionally
---                                          narrowed by target_id ($3)
+-- Filter contract:
+--   $1 status           NULL or '' → no status filter;   otherwise equality
+--   $2 target_type      NULL or '' → no target filter;  '__general__' → IS NULL;
+--                        'university' | 'college'        → that target_type, optionally
+--                                                         narrowed by target_id ($3)
+--   $3 target_id        empty → no id narrowing;         otherwise equality on target_id
+--   $4 inquiry_type     NULL or '' → no filter;          'counselling' | 'brochure'
+--                                                         → equality match
 --
--- We use NULLIF on $2 and $3 because sqlc hands us string params and Go's
--- empty string ("") is not the same as SQL NULL — without NULLIF the "no
--- filter" case would compare target_type to '' and match nothing.
+-- We use NULLIF because sqlc hands us string params and Go's empty string
+-- ("") is not the same as SQL NULL — without NULLIF the "no filter" cases
+-- would compare equality against '' and match nothing.
 SELECT COUNT(*) FROM counselling_inquiries
 WHERE (NULLIF($1, '') IS NULL OR status = $1)
   AND (
@@ -46,7 +51,8 @@ WHERE (NULLIF($1, '') IS NULL OR status = $1)
      OR ($2 = '__general__' AND target_type IS NULL)
      OR ($2 <> '__general__' AND target_type = $2
             AND (NULLIF($3, '') IS NULL OR target_id::text = $3))
-  );
+  )
+  AND (NULLIF($4, '') IS NULL OR inquiry_type = $4);
 
 -- name: ListCounsellingInquiries :many
 -- Same filter contract as CountCounsellingInquiries; see comment there.
@@ -55,7 +61,7 @@ SELECT
     ci.phone, ci.country, ci.preferred_university,
     ci.program_of_interest, ci.start_term, ci.current_education,
     ci.test_scores, ci.message, ci.resume_url,
-    ci.status, ci.reviewer_id, ci.reviewed_at, ci.review_note,
+    ci.status, ci.inquiry_type, ci.reviewer_id, ci.reviewed_at, ci.review_note,
     ci.created_at, ci.updated_at,
     COALESCE(u.name, co.name, '') AS target_name
 FROM counselling_inquiries ci
@@ -70,8 +76,9 @@ WHERE (NULLIF($1, '') IS NULL OR ci.status = $1)
      OR ($2 <> '__general__' AND ci.target_type = $2
             AND (NULLIF($3, '') IS NULL OR ci.target_id::text = $3))
   )
+  AND (NULLIF($4, '') IS NULL OR ci.inquiry_type = $4)
 ORDER BY ci.created_at DESC
-LIMIT $4 OFFSET $5;
+LIMIT $5 OFFSET $6;
 
 -- name: UpdateCounsellingStatus :one
 -- Sets status + reviewer stamp + note in one shot. The service decides

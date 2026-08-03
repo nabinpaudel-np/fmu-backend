@@ -28,6 +28,7 @@ type joinRow struct {
 	Message             *string
 	ResumeUrl           *string
 	Status              string
+	InquiryType         string
 	ReviewerID          pgtype.UUID
 	ReviewedAt          pgtype.Timestamptz
 	ReviewNote          *string
@@ -53,6 +54,7 @@ func fromGetRow(r sqlc.GetCounsellingInquiryByIDRow) joinRow {
 		Message:             r.Message,
 		ResumeUrl:           r.ResumeUrl,
 		Status:              r.Status,
+		InquiryType:         r.InquiryType,
 		ReviewerID:          r.ReviewerID,
 		ReviewedAt:          r.ReviewedAt,
 		ReviewNote:          r.ReviewNote,
@@ -79,6 +81,7 @@ func fromListRow(r sqlc.ListCounsellingInquiriesRow) joinRow {
 		Message:             r.Message,
 		ResumeUrl:           r.ResumeUrl,
 		Status:              r.Status,
+		InquiryType:         r.InquiryType,
 		ReviewerID:          r.ReviewerID,
 		ReviewedAt:          r.ReviewedAt,
 		ReviewNote:          r.ReviewNote,
@@ -94,6 +97,7 @@ func toListItem(r joinRow) CounsellingListItem {
 	return CounsellingListItem{
 		ID:                  r.ID,
 		Type:                targetTypeFromPtr(r.TargetType),
+		InquiryType:         InquiryType(r.InquiryType),
 		TargetID:            uuidStringPtr(r.TargetID),
 		TargetName:          r.TargetName,
 		FullName:            r.FullName,

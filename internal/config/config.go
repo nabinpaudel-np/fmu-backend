@@ -19,6 +19,7 @@ type Config struct {
 	AccessTokenSecret  string        `env:"ACCESS_TOKEN_SECRET,required"`
 	AccessTokenExpiry  time.Duration `env:"ACCESS_TOKEN_EXPIRY" envDefault:"60m"`
 	RefreshTokenExpiry time.Duration `env:"REFRESH_TOKEN_EXPIRY" envDefault:"168h"`
+	PasswordResetExpiry time.Duration `env:"PASSWORD_RESET_EXPIRY" envDefault:"1h"`
 
 	GoogleClientID     string `env:"GOOGLE_CLIENT_ID,required"`
 	GoogleClientSecret string `env:"GOOGLE_CLIENT_SECRET,required"`

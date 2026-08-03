@@ -35,16 +35,18 @@ type CreateParams struct {
 	TestScores          *string
 	Message             *string
 	ResumeURL           *string
+	InquiryType         string
 }
 
 // ListParams groups the list/count filter shape. Both functions take the
 // same params so callers can pass them straight through.
 type ListParams struct {
-	Status     string
-	TargetType string
-	TargetID   string
-	Limit      int32
-	Offset     int32
+	Status      string
+	TargetType  string
+	TargetID    string
+	InquiryType string
+	Limit       int32
+	Offset      int32
 }
 
 // UpdateParams bundles the PATCH payload. ReviewedAt is nullable: pass
@@ -80,6 +82,7 @@ func (r *counsellingRepository) Create(ctx context.Context, p CreateParams) (sql
 		TestScores:          p.TestScores,
 		Message:             p.Message,
 		ResumeUrl:           p.ResumeURL,
+		InquiryType:         p.InquiryType,
 	})
 }
 
@@ -92,6 +95,7 @@ func (r *counsellingRepository) List(ctx context.Context, p ListParams) ([]sqlc.
 		Column1: p.Status,
 		Column2: p.TargetType,
 		Column3: p.TargetID,
+		Column4: p.InquiryType,
 		Limit:   p.Limit,
 		Offset:  p.Offset,
 	})
@@ -102,6 +106,7 @@ func (r *counsellingRepository) Count(ctx context.Context, p ListParams) (int64,
 		Column1: p.Status,
 		Column2: p.TargetType,
 		Column3: p.TargetID,
+		Column4: p.InquiryType,
 	})
 }
 

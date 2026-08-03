@@ -102,6 +102,7 @@ type CounsellingInquiry struct {
 	Message             *string
 	ResumeUrl           *string
 	Status              string
+	InquiryType         string
 	ReviewerID          pgtype.UUID
 	ReviewedAt          pgtype.Timestamptz
 	ReviewNote          *string
@@ -117,6 +118,15 @@ type DegreeLevel struct {
 type Major struct {
 	ID   string
 	Name string
+}
+
+type PasswordResetToken struct {
+	ID        string
+	UserID    string
+	TokenHash string
+	ExpiresAt time.Time
+	UsedAt    pgtype.Timestamptz
+	CreatedAt time.Time
 }
 
 type Program struct {
