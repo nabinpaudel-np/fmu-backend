@@ -4,6 +4,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 // Filters holds the parsed query parameters for `GET /api/v1/universities`.
@@ -20,8 +22,19 @@ type Filters struct {
 	InstitutionType string
 	TestingPolicy   string
 	Country         string
-	State           string
-	City            string
+	// Countries is the multi-value form of Country (?countries=US,UK,CA).
+	// Singular + plural OR together, matching the rest of the multi-select
+	// facets in this file.
+	Countries []string
+	State     string
+	City      string
+
+	// Programs filters universities by offering the listed programs.
+	// Programs are linked to universities transitively via degree_levels
+	// (a program belongs to one degree, a university offers many degrees),
+	// so this resolves to "university has at least one degree_level that
+	// any of these programs belongs to". Invalid UUIDs are silently dropped.
+	Programs []string
 
 	TuitionMin    *int
 	TuitionMax    *int
@@ -52,7 +65,10 @@ func (f Filters) Empty() bool {
 		return false
 	}
 	if f.InstitutionType != "" || f.TestingPolicy != "" || f.Country != "" ||
-		f.State != "" || f.City != "" {
+		f.State != "" || f.City != "" || len(f.Countries) > 0 {
+		return false
+	}
+	if len(f.Programs) > 0 {
 		return false
 	}
 	if f.TuitionMin != nil || f.TuitionMax != nil ||
@@ -81,6 +97,8 @@ func ParseFilters(q url.Values) Filters {
 	f.InstitutionType = institutionTypeSlugToName[q.Get("institution_type")]
 	f.TestingPolicy = testingPolicySlugToName[q.Get("testing_policy")]
 	f.Country = q.Get("country")
+	f.Countries = splitCSV(q.Get("countries"))
+	f.Programs = splitUUIDs(q.Get("programs"))
 	f.State = q.Get("state_province")
 	f.City = q.Get("city")
 	f.Status = normalizeStatus(q.Get("status"))
@@ -130,6 +148,45 @@ func translateSlugs(csv string, table map[string]string) []string {
 		}
 		if name, ok := table[p]; ok {
 			out = append(out, name)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// splitCSV splits a comma-separated query value and trims whitespace. Empty
+// entries are dropped; an all-empty input returns nil.
+func splitCSV(csv string) []string {
+	if csv == "" {
+		return nil
+	}
+	parts := strings.Split(csv, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// splitUUIDs is splitCSV plus a UUID validation step. Invalid UUIDs are
+// silently dropped so a typo in the URL narrows the result instead of
+// erroring — matches the rest of the multi-select facets.
+func splitUUIDs(csv string) []string {
+	parts := splitCSV(csv)
+	if parts == nil {
+		return nil
+	}
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if _, err := uuid.Parse(p); err == nil {
+			out = append(out, p)
 		}
 	}
 	if len(out) == 0 {
