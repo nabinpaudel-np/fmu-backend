@@ -280,9 +280,32 @@ func buildUniversitiesWhere(f Filters) (string, []any) {
 
 	eq("u.institution_type = $%d", f.InstitutionType)
 	eq("u.testing_policy = $%d", f.TestingPolicy)
-	eq("u.country = $%d", f.Country)
 	eq("u.state = $%d", f.State)
 	eq("u.city = $%d", f.City)
+
+	// Country — singular (?country=) and plural (?countries=) merge into one
+	// ANY() clause. Both forms are accepted so existing callers don't break
+	// when the frontend migrates to the multi-value param.
+	countryValues := f.Countries
+	if f.Country != "" {
+		countryValues = append(countryValues, f.Country)
+	}
+	if len(countryValues) > 0 {
+		args = append(args, countryValues)
+		orClauses = append(orClauses, fmt.Sprintf("u.country = ANY($%d::text[])", len(args)))
+	}
+
+	// Programs — filter to universities whose degree_levels overlap with the
+	// given programs' degree_ids. The inner subquery hits the programs PK
+	// index so the planner resolves it cheaply; outer join hits the
+	// university_degree_levels PK on (university_id, degree_level_id).
+	if len(f.Programs) > 0 {
+		args = append(args, f.Programs)
+		orClauses = append(orClauses, fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM university_degree_levels udl WHERE udl.university_id = u.id AND udl.degree_level_id IN (SELECT degree_id FROM programs WHERE id = ANY($%d::uuid[])))",
+			len(args),
+		))
+	}
 
 	if len(f.CampusSettings) > 0 {
 		args = append(args, f.CampusSettings)
