@@ -23,6 +23,7 @@ type College struct {
 	Overview        string
 	Excerpt         *string
 	Country         *string
+	Continent       *string
 	State           *string
 	City            *string
 	FullLocation    *string
@@ -176,6 +177,7 @@ type University struct {
 	Overview                 *string
 	Excerpt                  *string
 	Country                  *string
+	Continent                *string
 	State                    *string
 	City                     *string
 	FullLocation             *string

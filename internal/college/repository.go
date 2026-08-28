@@ -44,7 +44,7 @@ const maxCollegeSearchResults = 50
 
 // Keep this list explicit because ALTER TABLE ADD COLUMN can make runtime order
 // differ from schema.sql's declaration order.
-const collegeColumnList = "id, name, slug, university_id, overview, excerpt, country, state, city, full_location, cover_image, logo, institution_type, campus_setting, contact_email, contact_phone, website, zipcode, founded_year, campus_size, gallery_images, is_popular, is_featured, full_address, maps_url, seo_title, seo_description, status, published_at, created_at, updated_at"
+const collegeColumnList = "id, name, slug, university_id, overview, excerpt, country, continent, state, city, full_location, cover_image, logo, institution_type, campus_setting, contact_email, contact_phone, website, zipcode, founded_year, campus_size, gallery_images, is_popular, is_featured, full_address, maps_url, seo_title, seo_description, status, published_at, created_at, updated_at"
 
 func NewCollegeRepository(queries *sqlc.Queries, pool *pgxpool.Pool) CollegeRepository {
 	return &collegeRepository{
@@ -150,7 +150,7 @@ func collectColleges(rows pgx.Rows) ([]sqlc.College, error) {
 		var c sqlc.College
 		if err := rows.Scan(
 			&c.ID, &c.Name, &c.Slug, &c.UniversityID, &c.Overview, &c.Excerpt,
-			&c.Country, &c.State, &c.City, &c.FullLocation,
+			&c.Country, &c.Continent, &c.State, &c.City, &c.FullLocation,
 			&c.CoverImage, &c.Logo, &c.InstitutionType, &c.CampusSetting,
 			&c.ContactEmail, &c.ContactPhone, &c.Website, &c.Zipcode,
 			&c.FoundedYear, &c.CampusSize, &c.GalleryImages,
@@ -274,6 +274,9 @@ func (r *collegeRepository) Update(ctx context.Context, id string, req *UpdateCo
 	if req.Country != nil {
 		addSet("country", *req.Country)
 	}
+	if req.Continent != nil {
+		addSet("continent", *req.Continent)
+	}
 	if req.State != nil {
 		addSet("state", *req.State)
 	}
@@ -342,7 +345,7 @@ func (r *collegeRepository) Update(ctx context.Context, id string, req *UpdateCo
 		// callers always get a College back.
 		if getErr := tx.QueryRow(ctx, "SELECT "+collegeColumnList+" FROM colleges WHERE id = $1", id).Scan(
 			&row.ID, &row.Name, &row.Slug, &row.UniversityID, &row.Overview, &row.Excerpt,
-			&row.Country, &row.State, &row.City, &row.FullLocation,
+			&row.Country, &row.Continent, &row.State, &row.City, &row.FullLocation,
 			&row.CoverImage, &row.Logo, &row.InstitutionType, &row.CampusSetting,
 			&row.ContactEmail, &row.ContactPhone, &row.Website, &row.Zipcode,
 			&row.FoundedYear, &row.CampusSize, &row.GalleryImages,
@@ -367,7 +370,7 @@ func (r *collegeRepository) Update(ctx context.Context, id string, req *UpdateCo
 
 		scanErr := tx.QueryRow(ctx, sql, args...).Scan(
 			&row.ID, &row.Name, &row.Slug, &row.UniversityID, &row.Overview, &row.Excerpt,
-			&row.Country, &row.State, &row.City, &row.FullLocation,
+			&row.Country, &row.Continent, &row.State, &row.City, &row.FullLocation,
 			&row.CoverImage, &row.Logo, &row.InstitutionType, &row.CampusSetting,
 			&row.ContactEmail, &row.ContactPhone, &row.Website, &row.Zipcode,
 			&row.FoundedYear, &row.CampusSize, &row.GalleryImages,

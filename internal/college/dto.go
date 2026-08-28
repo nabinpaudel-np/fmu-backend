@@ -10,6 +10,7 @@ type CreateCollegeRequest struct {
 	Excerpt      string `json:"excerpt"       validate:"omitempty,max=500"`
 
 	Country      string `json:"country"       validate:"omitempty,max=100"`
+	Continent    string `json:"continent"     validate:"omitempty,max=100"`
 	State        string `json:"state"         validate:"omitempty,max=100"`
 	City         string `json:"city"          validate:"omitempty,max=100"`
 	FullLocation string `json:"full_location" validate:"omitempty,max=255"`
@@ -57,6 +58,7 @@ type CreateCollegeResponse struct {
 	Overview        string   `json:"overview"`
 	Excerpt         string   `json:"excerpt"`
 	Country         string   `json:"country"`
+	Continent       string   `json:"continent"`
 	State           string   `json:"state"`
 	City            string   `json:"city"`
 	FullLocation    string   `json:"full_location"`
@@ -89,6 +91,7 @@ type UpdateCollegeRequest struct {
 	Overview     *string `json:"overview"      validate:"omitempty,min=1"`
 	Excerpt      *string `json:"excerpt"       validate:"omitempty,max=500"`
 	Country      *string `json:"country"       validate:"omitempty,max=100"`
+	Continent    *string `json:"continent,omitempty" validate:"omitempty,max=100"`
 	State        *string `json:"state"         validate:"omitempty,max=100"`
 	City         *string `json:"city"          validate:"omitempty,max=100"`
 	FullLocation *string `json:"full_location" validate:"omitempty,max=255"`
@@ -128,6 +131,7 @@ type CollegeListItem struct {
 	Slug              string `json:"slug"`
 	UniversityID      string `json:"university_id"`
 	Country           string `json:"country"`
+	Continent         string `json:"continent"`
 	State             string `json:"state"`
 	City              string `json:"city"`
 	Logo              string `json:"logo"`
@@ -181,6 +185,7 @@ type CollegeSearchResult struct {
 	Slug              string                   `json:"slug"`
 	University        CollegeUniversitySummary `json:"university"`
 	Country           string                   `json:"country"`
+	Continent         string                   `json:"continent"`
 	State             string                   `json:"state"`
 	City              string                   `json:"city"`
 	Logo              string                   `json:"logo"`

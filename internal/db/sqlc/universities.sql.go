@@ -25,7 +25,7 @@ func (q *Queries) CountUniversities(ctx context.Context) (int64, error) {
 const createUniversity = `-- name: CreateUniversity :one
 INSERT INTO universities (
     name, slug, overview, excerpt,
-    country, state, city, full_location,
+    country, continent, state, city, full_location,
     cover_image, logo,
     institution_type, campus_setting,
     in_state_tuition, out_of_state_tuition, international_tuition,
@@ -45,9 +45,9 @@ VALUES (
     $11, $12, $13, $14, $15, $16, $17, $18, $19,
     $20, $21, $22, $23, $24, $25, $26, $27, $28,
     $29, $30, $31, $32, $33, $34, $35, $36, $37,
-    $38, $39, $40, $41, $42, $43, $44, $45
+    $38, $39, $40, $41, $42, $43, $44, $45, $46
 )
-RETURNING id, name, slug, overview, excerpt, country, state, city, full_location, cover_image, logo, institution_type, campus_setting, in_state_tuition, out_of_state_tuition, international_tuition, need_based_aid, merit_scholarships, work_study, no_application_fee, acceptance_rate, testing_policy, sat_range, act_range, on_campus_housing, freshmen_required_on_campus, contact_email, contact_phone, website, zipcode, tuition_min, tuition_max, avg_high_school_gpa, founded_year, campus_size, gallery_images, is_popular, is_featured, maps_url, full_address, employment_rate, research_output, housing_type, seo_title, seo_description, status, published_at, created_at, updated_at
+RETURNING id, name, slug, overview, excerpt, country, continent, state, city, full_location, cover_image, logo, institution_type, campus_setting, in_state_tuition, out_of_state_tuition, international_tuition, need_based_aid, merit_scholarships, work_study, no_application_fee, acceptance_rate, testing_policy, sat_range, act_range, on_campus_housing, freshmen_required_on_campus, contact_email, contact_phone, website, zipcode, tuition_min, tuition_max, avg_high_school_gpa, founded_year, campus_size, gallery_images, is_popular, is_featured, maps_url, full_address, employment_rate, research_output, housing_type, seo_title, seo_description, status, published_at, created_at, updated_at
 `
 
 type CreateUniversityParams struct {
@@ -56,6 +56,7 @@ type CreateUniversityParams struct {
 	Overview                 *string
 	Excerpt                  *string
 	Country                  *string
+	Continent                *string
 	State                    *string
 	City                     *string
 	FullLocation             *string
@@ -105,6 +106,7 @@ func (q *Queries) CreateUniversity(ctx context.Context, arg CreateUniversityPara
 		arg.Overview,
 		arg.Excerpt,
 		arg.Country,
+		arg.Continent,
 		arg.State,
 		arg.City,
 		arg.FullLocation,
@@ -154,6 +156,7 @@ func (q *Queries) CreateUniversity(ctx context.Context, arg CreateUniversityPara
 		&i.Overview,
 		&i.Excerpt,
 		&i.Country,
+		&i.Continent,
 		&i.State,
 		&i.City,
 		&i.FullLocation,
@@ -572,7 +575,7 @@ func (q *Queries) GetUniversityAthletics(ctx context.Context, universityID strin
 }
 
 const getUniversityByID = `-- name: GetUniversityByID :one
-SELECT id, name, slug, overview, excerpt, country, state, city, full_location, cover_image, logo, institution_type, campus_setting, in_state_tuition, out_of_state_tuition, international_tuition, need_based_aid, merit_scholarships, work_study, no_application_fee, acceptance_rate, testing_policy, sat_range, act_range, on_campus_housing, freshmen_required_on_campus, contact_email, contact_phone, website, zipcode, tuition_min, tuition_max, avg_high_school_gpa, founded_year, campus_size, gallery_images, is_popular, is_featured, maps_url, full_address, employment_rate, research_output, housing_type, seo_title, seo_description, status, published_at, created_at, updated_at FROM universities WHERE id = $1
+SELECT id, name, slug, overview, excerpt, country, continent, state, city, full_location, cover_image, logo, institution_type, campus_setting, in_state_tuition, out_of_state_tuition, international_tuition, need_based_aid, merit_scholarships, work_study, no_application_fee, acceptance_rate, testing_policy, sat_range, act_range, on_campus_housing, freshmen_required_on_campus, contact_email, contact_phone, website, zipcode, tuition_min, tuition_max, avg_high_school_gpa, founded_year, campus_size, gallery_images, is_popular, is_featured, maps_url, full_address, employment_rate, research_output, housing_type, seo_title, seo_description, status, published_at, created_at, updated_at FROM universities WHERE id = $1
 `
 
 func (q *Queries) GetUniversityByID(ctx context.Context, id string) (University, error) {
@@ -585,6 +588,7 @@ func (q *Queries) GetUniversityByID(ctx context.Context, id string) (University,
 		&i.Overview,
 		&i.Excerpt,
 		&i.Country,
+		&i.Continent,
 		&i.State,
 		&i.City,
 		&i.FullLocation,
@@ -896,7 +900,7 @@ func (q *Queries) ListRepresentedUniversityIDs(ctx context.Context, dollar_1 []s
 }
 
 const listUniversities = `-- name: ListUniversities :many
-SELECT id, name, slug, overview, excerpt, country, state, city, full_location, cover_image, logo, institution_type, campus_setting, in_state_tuition, out_of_state_tuition, international_tuition, need_based_aid, merit_scholarships, work_study, no_application_fee, acceptance_rate, testing_policy, sat_range, act_range, on_campus_housing, freshmen_required_on_campus, contact_email, contact_phone, website, zipcode, tuition_min, tuition_max, avg_high_school_gpa, founded_year, campus_size, gallery_images, is_popular, is_featured, maps_url, full_address, employment_rate, research_output, housing_type, seo_title, seo_description, status, published_at, created_at, updated_at FROM universities ORDER BY name LIMIT $1 OFFSET $2
+SELECT id, name, slug, overview, excerpt, country, continent, state, city, full_location, cover_image, logo, institution_type, campus_setting, in_state_tuition, out_of_state_tuition, international_tuition, need_based_aid, merit_scholarships, work_study, no_application_fee, acceptance_rate, testing_policy, sat_range, act_range, on_campus_housing, freshmen_required_on_campus, contact_email, contact_phone, website, zipcode, tuition_min, tuition_max, avg_high_school_gpa, founded_year, campus_size, gallery_images, is_popular, is_featured, maps_url, full_address, employment_rate, research_output, housing_type, seo_title, seo_description, status, published_at, created_at, updated_at FROM universities ORDER BY name LIMIT $1 OFFSET $2
 `
 
 type ListUniversitiesParams struct {
@@ -920,6 +924,7 @@ func (q *Queries) ListUniversities(ctx context.Context, arg ListUniversitiesPara
 			&i.Overview,
 			&i.Excerpt,
 			&i.Country,
+			&i.Continent,
 			&i.State,
 			&i.City,
 			&i.FullLocation,
@@ -980,7 +985,7 @@ SET status = 'published',
     published_at = NOW(),
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, name, slug, overview, excerpt, country, state, city, full_location, cover_image, logo, institution_type, campus_setting, in_state_tuition, out_of_state_tuition, international_tuition, need_based_aid, merit_scholarships, work_study, no_application_fee, acceptance_rate, testing_policy, sat_range, act_range, on_campus_housing, freshmen_required_on_campus, contact_email, contact_phone, website, zipcode, tuition_min, tuition_max, avg_high_school_gpa, founded_year, campus_size, gallery_images, is_popular, is_featured, maps_url, full_address, employment_rate, research_output, housing_type, seo_title, seo_description, status, published_at, created_at, updated_at
+RETURNING id, name, slug, overview, excerpt, country, continent, state, city, full_location, cover_image, logo, institution_type, campus_setting, in_state_tuition, out_of_state_tuition, international_tuition, need_based_aid, merit_scholarships, work_study, no_application_fee, acceptance_rate, testing_policy, sat_range, act_range, on_campus_housing, freshmen_required_on_campus, contact_email, contact_phone, website, zipcode, tuition_min, tuition_max, avg_high_school_gpa, founded_year, campus_size, gallery_images, is_popular, is_featured, maps_url, full_address, employment_rate, research_output, housing_type, seo_title, seo_description, status, published_at, created_at, updated_at
 `
 
 func (q *Queries) PublishUniversity(ctx context.Context, id string) (University, error) {
@@ -993,6 +998,7 @@ func (q *Queries) PublishUniversity(ctx context.Context, id string) (University,
 		&i.Overview,
 		&i.Excerpt,
 		&i.Country,
+		&i.Continent,
 		&i.State,
 		&i.City,
 		&i.FullLocation,
@@ -1046,6 +1052,7 @@ SELECT
     name,
     slug,
     COALESCE(country, '') AS country,
+    COALESCE(continent, '') AS continent,
     COALESCE(state, '') AS state,
     COALESCE(city, '') AS city,
     COALESCE(full_location, '') AS full_location,
@@ -1056,7 +1063,8 @@ WHERE status = 'published'
    OR similarity(full_location, $1) > 0.2
    OR similarity(city, $1) > 0.2
    OR similarity(state, $1) > 0.2
-   OR similarity(country, $1) > 0.2)
+   OR similarity(country, $1) > 0.2
+   OR similarity(continent, $1) > 0.2)
 ORDER BY GREATEST(
     similarity(name, $1),
     similarity(full_location, $1),
@@ -1075,6 +1083,7 @@ type SearchUniversitiesRow struct {
 	Name         string
 	Slug         string
 	Country      string
+	Continent    string
 	State        string
 	City         string
 	FullLocation string
@@ -1100,6 +1109,7 @@ func (q *Queries) SearchUniversities(ctx context.Context, arg SearchUniversities
 			&i.Name,
 			&i.Slug,
 			&i.Country,
+			&i.Continent,
 			&i.State,
 			&i.City,
 			&i.FullLocation,

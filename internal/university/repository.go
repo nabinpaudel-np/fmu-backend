@@ -188,7 +188,7 @@ func (r *universityRepository) Get(ctx context.Context, q pagination.Query, f Fi
 	// Columns spelled out: schema.sql order ≠ runtime table order, so
 	// SELECT * doesn't match the sqlc struct scan order.
 	listSQL := fmt.Sprintf(
-		"SELECT id, name, slug, overview, excerpt, country, state, city, full_location, cover_image, logo, institution_type, campus_setting, in_state_tuition, out_of_state_tuition, international_tuition, need_based_aid, merit_scholarships, work_study, no_application_fee, acceptance_rate, testing_policy, sat_range, act_range, on_campus_housing, freshmen_required_on_campus, contact_email, contact_phone, website, zipcode, tuition_min, tuition_max, avg_high_school_gpa, founded_year, campus_size, gallery_images, is_popular, is_featured, maps_url, full_address, employment_rate, research_output, housing_type, seo_title, seo_description, status, published_at, created_at, updated_at FROM universities u WHERE 1=1%s ORDER BY u.name LIMIT $%d OFFSET $%d",
+		"SELECT id, name, slug, overview, excerpt, country, continent, state, city, full_location, cover_image, logo, institution_type, campus_setting, in_state_tuition, out_of_state_tuition, international_tuition, need_based_aid, merit_scholarships, work_study, no_application_fee, acceptance_rate, testing_policy, sat_range, act_range, on_campus_housing, freshmen_required_on_campus, contact_email, contact_phone, website, zipcode, tuition_min, tuition_max, avg_high_school_gpa, founded_year, campus_size, gallery_images, is_popular, is_featured, maps_url, full_address, employment_rate, research_output, housing_type, seo_title, seo_description, status, published_at, created_at, updated_at FROM universities u WHERE 1=1%s ORDER BY u.name LIMIT $%d OFFSET $%d",
 		where, len(listArgs)-1, len(listArgs),
 	)
 
@@ -211,7 +211,7 @@ func collectUniversities(rows pgx.Rows) ([]sqlc.University, error) {
 		var u sqlc.University
 		if err := rows.Scan(
 			&u.ID, &u.Name, &u.Slug, &u.Overview, &u.Excerpt,
-			&u.Country, &u.State, &u.City, &u.FullLocation,
+			&u.Country, &u.Continent, &u.State, &u.City, &u.FullLocation,
 			&u.CoverImage, &u.Logo,
 			&u.InstitutionType, &u.CampusSetting,
 			&u.InStateTuition, &u.OutOfStateTuition, &u.InternationalTuition,
@@ -470,6 +470,9 @@ func (r *universityRepository) Patch(ctx context.Context, id string, req *PatchU
 	if req.Country != nil {
 		addSet("country", *req.Country)
 	}
+	if req.Continent != nil {
+		addSet("continent", *req.Continent)
+	}
 	if req.State != nil {
 		addSet("state", *req.State)
 	}
@@ -593,13 +596,13 @@ func (r *universityRepository) Patch(ctx context.Context, id string, req *PatchU
 	// RETURNING lists columns in scan order, not SELECT *. The ALTER TABLE ADD
 	// COLUMN migration appended fields after created_at/updated_at, so the
 	// physical column order no longer matches the schema.sql declaration.
-	sql := fmt.Sprintf("UPDATE universities SET %s WHERE id = $%d RETURNING id, name, slug, overview, excerpt, country, state, city, full_location, cover_image, logo, institution_type, campus_setting, in_state_tuition, out_of_state_tuition, international_tuition, need_based_aid, merit_scholarships, work_study, no_application_fee, acceptance_rate, testing_policy, sat_range, act_range, on_campus_housing, freshmen_required_on_campus, contact_email, contact_phone, website, zipcode, tuition_min, tuition_max, avg_high_school_gpa, founded_year, campus_size, gallery_images, is_popular, is_featured, maps_url, full_address, employment_rate, research_output, housing_type, seo_title, seo_description, status, published_at, created_at, updated_at",
+	sql := fmt.Sprintf("UPDATE universities SET %s WHERE id = $%d RETURNING id, name, slug, overview, excerpt, country, continent, state, city, full_location, cover_image, logo, institution_type, campus_setting, in_state_tuition, out_of_state_tuition, international_tuition, need_based_aid, merit_scholarships, work_study, no_application_fee, acceptance_rate, testing_policy, sat_range, act_range, on_campus_housing, freshmen_required_on_campus, contact_email, contact_phone, website, zipcode, tuition_min, tuition_max, avg_high_school_gpa, founded_year, campus_size, gallery_images, is_popular, is_featured, maps_url, full_address, employment_rate, research_output, housing_type, seo_title, seo_description, status, published_at, created_at, updated_at",
 		strings.Join(sets, ", "), len(args))
 
 	var row sqlc.University
 	err = tx.QueryRow(ctx, sql, args...).Scan(
 		&row.ID, &row.Name, &row.Slug, &row.Overview, &row.Excerpt,
-		&row.Country, &row.State, &row.City, &row.FullLocation,
+		&row.Country, &row.Continent, &row.State, &row.City, &row.FullLocation,
 		&row.CoverImage, &row.Logo,
 		&row.InstitutionType, &row.CampusSetting,
 		&row.InStateTuition, &row.OutOfStateTuition, &row.InternationalTuition,

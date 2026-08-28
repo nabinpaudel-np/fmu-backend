@@ -158,6 +158,7 @@ CREATE TABLE public.universities (
     overview text,
     excerpt character varying(500),
     country character varying(100),
+    continent character varying(100),
     state character varying(100),
     city character varying(100),
     full_location character varying(255),
@@ -714,7 +715,17 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260720000002'),
     ('20260723000001'),
     ('20260724000001'),
-    ('20260725000001');
+    ('20260725000001'),
+    ('20260726000001'),
+    ('20260727000001'),
+    ('20260728000001'),
+    ('20260728000002'),
+    ('20260729000001'),
+    ('20260730000001'),
+    ('20260730000002'),
+    ('20260802000001'),
+    ('20260802000002'),
+    ('20260828000001');
 
 --
 -- Name: colleges; Type: TABLE; Schema: public; Owner: -
@@ -728,6 +739,7 @@ CREATE TABLE public.colleges (
     overview text NOT NULL,
     excerpt character varying(500),
     country character varying(100),
+    continent character varying(100),
     state character varying(100),
     city character varying(100),
     full_location character varying(255),

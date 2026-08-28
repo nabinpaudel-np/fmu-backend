@@ -1,7 +1,7 @@
 -- name: CreateCollege :one
 INSERT INTO colleges (
     name, slug, university_id, overview, excerpt,
-    country, state, city, full_location,
+    country, continent, state, city, full_location,
     cover_image, logo, institution_type, campus_setting,
     contact_email, contact_phone, website, zipcode,
     founded_year, campus_size, gallery_images,
@@ -11,17 +11,17 @@ INSERT INTO colleges (
 )
 VALUES (
     $1, $2, $3, $4, $5,
-    $6, $7, $8, $9,
-    $10, $11, $12, $13,
-    $14, $15, $16, $17,
-    $18, $19, $20,
-    $21, $22,
-    $23, $24, $25, $26,
-    $27
+    $6, $7, $8, $9, $10,
+    $11, $12, $13, $14,
+    $15, $16, $17, $18,
+    $19, $20, $21,
+    $22, $23,
+    $24, $25, $26, $27,
+    $28
 )
 RETURNING
     id, name, slug, university_id, overview, excerpt,
-    country, state, city, full_location,
+    country, continent, state, city, full_location,
     cover_image, logo, institution_type, campus_setting,
     contact_email, contact_phone, website, zipcode,
     founded_year, campus_size, gallery_images,
@@ -32,7 +32,7 @@ RETURNING
 -- name: GetCollegeByID :one
 SELECT
     id, name, slug, university_id, overview, excerpt,
-    country, state, city, full_location,
+    country, continent, state, city, full_location,
     cover_image, logo, institution_type, campus_setting,
     contact_email, contact_phone, website, zipcode,
     founded_year, campus_size, gallery_images,
@@ -45,7 +45,7 @@ WHERE id = $1;
 -- name: ListCollegesByUniversity :many
 SELECT
     id, name, slug, university_id, overview, excerpt,
-    country, state, city, full_location,
+    country, continent, state, city, full_location,
     cover_image, logo, institution_type, campus_setting,
     contact_email, contact_phone, website, zipcode,
     founded_year, campus_size, gallery_images,
@@ -130,6 +130,7 @@ SELECT
     u.slug AS university_slug,
     COALESCE(u.logo, '') AS university_logo,
     COALESCE(c.country, '') AS country,
+    COALESCE(c.continent, '') AS continent,
     COALESCE(c.state, '') AS state,
     COALESCE(c.city, '') AS city,
     COALESCE(c.full_location, '') AS full_location,
@@ -142,6 +143,7 @@ WHERE c.status = 'published'
    OR similarity(c.city, $1) > 0.2
    OR similarity(c.state, $1) > 0.2
    OR similarity(c.country, $1) > 0.2
+   OR similarity(c.continent, $1) > 0.2
    OR similarity(u.name, $1) > 0.2
    OR similarity(u.slug, $1) > 0.2)
 ORDER BY GREATEST(
@@ -166,7 +168,7 @@ SET status = 'published',
     updated_at = NOW()
 WHERE id = $1
 RETURNING id, name, slug, university_id, overview, excerpt,
-    country, state, city, full_location,
+    country, continent, state, city, full_location,
     cover_image, logo, institution_type, campus_setting,
     contact_email, contact_phone, website, zipcode,
     founded_year, campus_size, gallery_images,

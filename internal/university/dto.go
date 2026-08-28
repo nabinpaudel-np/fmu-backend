@@ -43,6 +43,7 @@ type CreateUniversityRequest struct {
 	Excerpt  string `json:"excerpt" validate:"omitempty,max=500" example:"World-class research university founded in 1861."`
 
 	Country      string `json:"country" validate:"required" example:"US"`
+	Continent    string `json:"continent" validate:"omitempty,max=100" example:"North America"`
 	State        string `json:"state" validate:"omitempty" example:"MA"`
 	City         string `json:"city" validate:"required" example:"Cambridge"`
 	FullLocation string `json:"full_location" validate:"omitempty" example:"Cambridge, MA, US"`
@@ -115,6 +116,7 @@ type PatchUniversityRequest struct {
 	Excerpt  *string `json:"excerpt,omitempty"   validate:"omitempty,max=500"`
 
 	Country      *string `json:"country,omitempty"       validate:"omitempty,max=100"`
+	Continent    *string `json:"continent,omitempty"     validate:"omitempty,max=100"`
 	State        *string `json:"state,omitempty"         validate:"omitempty,max=100"`
 	City         *string `json:"city,omitempty"          validate:"omitempty,max=100"`
 	FullLocation *string `json:"full_location,omitempty" validate:"omitempty,max=255"`
@@ -189,6 +191,7 @@ type UniversityListItem struct {
 	Name              string  `json:"name"`
 	Slug              string  `json:"slug"`
 	Country           string  `json:"country"`
+	Continent         string  `json:"continent"`
 	State             string  `json:"state"`
 	City              string  `json:"city"`
 	Logo              string  `json:"logo"`
@@ -220,6 +223,7 @@ type UniversitySearchResult struct {
 	Name              string `json:"name"`
 	Slug              string `json:"slug"`
 	Country           string `json:"country"`
+	Continent         string `json:"continent"`
 	State             string `json:"state"`
 	City              string `json:"city"`
 	FullLocation      string `json:"full_location"`
@@ -242,6 +246,7 @@ type CreateUniversityResponse struct {
 	Overview                 string    `json:"overview"`
 	Excerpt                  string    `json:"excerpt"`
 	Country                  string    `json:"country"`
+	Continent                string    `json:"continent"`
 	State                    string    `json:"state"`
 	City                     string    `json:"city"`
 	FullLocation             string    `json:"full_location"`
