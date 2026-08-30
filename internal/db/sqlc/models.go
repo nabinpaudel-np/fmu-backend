@@ -15,6 +15,23 @@ type Athletic struct {
 	Name string
 }
 
+type Blog struct {
+	ID                string
+	Title             string
+	Slug              string
+	MetaDescription   *string
+	BodyHtml          string
+	CoverImage        *string
+	Status            string
+	PublishedAt       pgtype.Timestamptz
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	AuthorName        *string
+	AuthorDescription *string
+	AuthorTitle       *string
+	Tags              []string
+}
+
 type College struct {
 	ID              string
 	Name            string

@@ -13,6 +13,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"fmu-backend/internal/auth"
+	"fmu-backend/internal/blog"
 	"fmu-backend/internal/claim"
 	"fmu-backend/internal/cloudinary"
 	"fmu-backend/internal/college"
@@ -79,6 +80,10 @@ func main() {
 	programsRepo := programs.NewProgramRepository(queries, pool)
 	programsSvc := programs.NewProgramService(programsRepo)
 	programsHandler := programs.NewProgramHandler(programsSvc)
+
+	blogRepo := blog.NewBlogRepository(queries, pool)
+	blogSvc := blog.NewBlogService(blogRepo)
+	blogHandler := blog.NewBlogHandler(blogSvc)
 
 	universityRepo := university.NewUniversityRepository(queries, pool)
 	universitySvc := university.NewUniversityService(universityRepo)
@@ -184,6 +189,7 @@ func main() {
 	claim.RegisterRoutes(r, claimHandler, authMW, adminMW, optionalAuthMW)
 	counselling.RegisterRoutes(r, counsellingHandler, authMW, adminMW, adminOrRepMW)
 	programs.RegisterRoutes(r, programsHandler, authMW, adminMW)
+	blog.RegisterRoutes(r, blogHandler, authMW, adminMW)
 	passwordreset.RegisterRoutes(r, resetHandler)
 
 	server := &http.Server{

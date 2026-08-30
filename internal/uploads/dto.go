@@ -9,10 +9,11 @@ var AllowedPurposes = map[string]struct{}{
 	"cover":   {},
 	"gallery": {},
 	"avatar":  {},
+	"blog":    {},
 }
 
 type SignUploadRequest struct {
-	Purpose string `json:"purpose" validate:"required,oneof=logo cover gallery avatar"`
+	Purpose string `json:"purpose" validate:"required,oneof=logo cover gallery avatar blog"`
 }
 
 type SignUploadResponse struct {

@@ -35,6 +35,7 @@ var (
 	ErrInvalidPasswordResetToken          = errors.New("invalid password reset token")
 	ErrPasswordResetTokenExpired          = errors.New("password reset token has expired")
 	ErrPasswordResetTokenUsed             = errors.New("password reset token has already been used")
+	ErrBlogSlugTaken                      = errors.New("blog with this slug already exists")
 )
 
 // InvalidReferencesError is returned when one or more UUIDs in a request

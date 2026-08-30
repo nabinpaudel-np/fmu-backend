@@ -32,7 +32,7 @@ var allowedDocumentMimes = map[string]struct{}{
 
 func isImagePurpose(p string) bool {
 	switch p {
-	case "logo", "cover", "gallery", "avatar":
+	case "logo", "cover", "gallery", "avatar", "blog":
 		return true
 	}
 	return false
@@ -42,7 +42,8 @@ func isImagePurpose(p string) bool {
 // Branding assets (logo/cover/gallery) belong to a university/college and
 // only admins or the bound representative may upload them. Avatars are
 // personal — any authenticated user (admin, rep, student) may upload their
-// own. Without this check, a student could mint signed Cloudinary uploads
+// own. Blog covers and inline editor images are admin-curated content.
+// Without this check, a student could mint signed Cloudinary uploads
 // into the `logo` folder without owning a university.
 func purposeAllowedForRole(role, purpose string) bool {
 	switch purpose {
@@ -50,6 +51,8 @@ func purposeAllowedForRole(role, purpose string) bool {
 		return role == auth.RoleAdmin || role == auth.RoleRepresentative
 	case "avatar":
 		return role == auth.RoleAdmin || role == auth.RoleRepresentative || role == auth.RoleStudent
+	case "blog":
+		return role == auth.RoleAdmin
 	}
 	return false
 }
@@ -98,7 +101,7 @@ func (h *UploadsHandler) Sign(w http.ResponseWriter, r *http.Request) {
 func (h *UploadsHandler) UploadImage(w http.ResponseWriter, r *http.Request) {
 	purpose := r.URL.Query().Get("purpose")
 	if !isImagePurpose(purpose) {
-		response.Error(w, http.StatusBadRequest, "query parameter 'purpose' must be one of: logo, cover, gallery, avatar")
+		response.Error(w, http.StatusBadRequest, "query parameter 'purpose' must be one of: logo, cover, gallery, avatar, blog")
 		return
 	}
 
