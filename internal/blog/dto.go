@@ -9,7 +9,7 @@ type CreateBlogRequest struct {
 	AuthorName        *string  `json:"author_name"       validate:"omitempty,max=255"`
 	AuthorDescription *string  `json:"author_description" validate:"omitempty,max=2000"`
 	AuthorTitle       *string  `json:"author_title"      validate:"omitempty,max=255"`
-	Tags              []string `json:"tags"              validate:"omitempty,dive,min=1,max=50,max=20"`
+	Tags              []string `json:"tags"              validate:"omitempty,max=20,dive,min=1,max=50"`
 	// Status is optional on create; defaults to "draft" if empty.
 	Status string `json:"status" validate:"omitempty,oneof=draft published archived"`
 }
@@ -23,7 +23,7 @@ type UpdateBlogRequest struct {
 	AuthorName        *string  `json:"author_name"       validate:"omitempty,max=255"`
 	AuthorDescription *string  `json:"author_description" validate:"omitempty,max=2000"`
 	AuthorTitle       *string  `json:"author_title"      validate:"omitempty,max=255"`
-	Tags              []string `json:"tags"              validate:"omitempty,dive,min=1,max=50,max=20"`
+	Tags              []string `json:"tags"              validate:"omitempty,max=20,dive,min=1,max=50"`
 	// Status and published_at are NOT updatable here — those move through
 	// POST /blogs/{id}/publish so editors can fix typos in a live post
 	// without re-publishing.
