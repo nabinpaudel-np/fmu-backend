@@ -1,0 +1,4 @@
+name,slug,country,continent,city,institution_type,campus_setting,contact_email,website,overview,degree_levels,majors,founded_year,tuition_min,tuition_max
+Good University A,good-a,US,North America,Springfield,Public,Urban,info@a.edu,https://a.edu,A university with valid numeric values.,Bachelors,MATH,1900,10000,50000
+Bad Tuition University,bad-tuition,US,North America,Shelbyville,Public,Urban,info@b.edu,https://b.edu,A university with non-numeric tuition.,Bachelors,MATH,1900,abc,50000
+Good University B,good-b,US,North America,Capital City,Public,Urban,info@c.edu,https://c.edu,A university with valid numeric values.,Bachelors,MATH,1900,15000,60000
