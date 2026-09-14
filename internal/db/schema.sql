@@ -1299,3 +1299,56 @@ CREATE INDEX idx_password_reset_tokens_user_id ON public.password_reset_tokens U
 
 ALTER TABLE ONLY public.password_reset_tokens
     ADD CONSTRAINT password_reset_tokens_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: blogs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.blogs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    title character varying(255) NOT NULL,
+    slug character varying(255) NOT NULL,
+    meta_description character varying(160),
+    body_html text NOT NULL,
+    cover_image character varying(500),
+    status character varying(20) DEFAULT 'draft' NOT NULL,
+    published_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    author_name character varying(255),
+    author_description text,
+    author_title character varying(255),
+    tags text[] DEFAULT '{}'::text[] NOT NULL
+);
+
+
+--
+-- Name: blogs blogs_slug_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.blogs
+    ADD CONSTRAINT blogs_slug_key UNIQUE (slug);
+
+
+--
+-- Name: blogs blogs_status_check; Type: CHECK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE public.blogs
+    ADD CONSTRAINT blogs_status_check CHECK (((status)::text = ANY ((ARRAY['draft'::character varying, 'published'::character varying, 'archived'::character varying])::text[])));
+
+
+--
+-- Name: idx_blogs_slug; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_blogs_slug ON public.blogs USING btree (slug);
+
+
+--
+-- Name: idx_blogs_status_published_at; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_blogs_status_published_at ON public.blogs USING btree (status, published_at DESC NULLS LAST);
+CREATE INDEX idx_blogs_tags ON public.blogs USING gin (tags);
