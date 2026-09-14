@@ -686,6 +686,7 @@ Reads are public. Creating a university is admin-only; updating allows an admin 
 | `GET /api/v1/universities/lookups`             | public |
 | `POST /api/v1/universities`                    | admin                           |
 | `POST /api/v1/universities/{id}/publish`       | admin                           |
+| `POST /api/v1/universities/bulk`               | admin (CSV upload, all-or-nothing) |
 | `PATCH /api/v1/universities/{id}`              | admin or matching university rep |
 
 ### GET `/api/v1/universities`
@@ -1154,6 +1155,194 @@ Create a new university.
   ```json
   { "success": false, "error": "university with this slug already exists (slug=mit)" }
   ```
+
+---
+
+### POST `/api/v1/universities/bulk`
+
+Upload many universities at once via a CSV file. Designed for admins onboarding batches of schools — typical use is uploading an ever-growing CSV: re-uploading the same file with new rows appended inserts only the genuinely new ones (idempotent on `slug`).
+
+**Auth:** admin only
+
+#### Request
+
+`multipart/form-data` with:
+
+| Field    | Type       | Required | Notes                                                                 |
+|----------|------------|----------|-----------------------------------------------------------------------|
+| `file`   | File (CSV) | yes      | Plain-text CSV, UTF-8. Max **20 MiB**. Header row required.           |
+| `status` | enum       | yes | `draft` (only `name`+`slug` required) or `published` (all required fields). Default: `draft`. |
+
+#### CSV column reference
+
+Header row is mandatory. Headers are matched case-insensitively after trim; a leading BOM is stripped automatically.
+
+| Column | Type | Required when | Notes |
+|--------|------|---------------|-------|
+| `name` | string | always | max 255 |
+| `slug` | string | always | normalized (lowercased + trimmed); 2–255 chars |
+| `overview` | text | `published` | |
+| `excerpt` | string ≤500 | optional | |
+| `country` | string | `published` | |
+| `continent` | string ≤100 | optional | |
+| `state` | string | optional | |
+| `city` | string | `published` | |
+| `zipcode` | string | optional | kept as text (zip+4 OK) |
+| `full_location` | string | optional | |
+| `cover_image` | URL | optional | http(s) only |
+| `logo` | URL | optional | http(s) only |
+| `institution_type` | string | `published` | |
+| `campus_setting` | string | `published` | |
+| `in_state_tuition` | number | optional | |
+| `out_of_state_tuition` | number | optional | |
+| `international_tuition` | number | optional | |
+| `tuition_min` | int | optional | must be ≤ `tuition_max` if both set |
+| `tuition_max` | int | optional | |
+| `need_based_aid` | bool | optional | accepts `true/false`, `1/0`, `yes/no`, `y/n` |
+| `merit_scholarships` | bool | optional | |
+| `work_study` | bool | optional | |
+| `no_application_fee` | bool | optional | |
+| `acceptance_rate` | number 0–100 | optional | |
+| `testing_policy` | string | optional | |
+| `sat_range` | string | optional | |
+| `act_range` | string | optional | |
+| `on_campus_housing` | bool | optional | |
+| `freshmen_required_on_campus` | bool | optional | |
+| `contact_email` | email | `published` | RFC 5322 |
+| `contact_phone` | string | optional | |
+| `website` | URL | `published` | http(s) only |
+| `avg_high_school_gpa` | number 0–5 | optional | |
+| `founded_year` | int 1000–2100 | optional | |
+| `campus_size` | string | optional | |
+| `gallery_images` | pipe-separated URLs | optional | `https://a.jpg\|https://b.jpg` |
+| `is_popular` | bool | optional | |
+| `is_featured` | bool | optional | |
+| `maps_url` | URL | optional | |
+| `full_address` | string ≤500 | optional | |
+| `employment_rate` | number 0–100 | optional | |
+| `research_output` | string | optional | |
+| `housing_type` | string | optional | |
+| `seo_title` | string ≤70 | optional | |
+| `seo_description` | string ≤160 | optional | |
+| `degree_levels` | pipe-separated names | `published` (≥1) | resolved by name (case-insensitive) against the `degree_levels` lookup table |
+| `majors` | pipe-separated names | `published` (≥1) | resolved by name against `majors` |
+| `study_formats` | pipe-separated names | optional | resolved by name against `study_formats` |
+
+> Multi-value columns use `|` (pipe) as the inner separator to avoid CSV-escaping trouble. Names are matched against the live lookup tables — get the current valid list from `GET /api/v1/universities/lookups`. Unknown names reject the whole upload; the response surfaces the offending name along with valid examples.
+
+#### Behavior
+
+- **All-or-nothing validation.** Any row that fails validation rejects the entire upload with `400` — nothing is inserted. The response lists every offending row so the admin can fix the CSV and resubmit.
+- **Idempotent on `slug`.** Rows whose `slug` already exists in the DB are silently dropped before insertion. Re-uploading an ever-growing CSV (the "append and reupload" workflow) creates only the genuinely new rows.
+- **Race-safe.** A second admin writing the same slug in the millisecond between our pre-flight check and our insert is absorbed by `ON CONFLICT DO NOTHING` and counted under `skipped_existing`.
+- **Drafts validate format only.** When `status=draft`, required-field checks are skipped but format checks (email shape, URL shape, numeric ranges) still fire — keeps obvious garbage out of the DB.
+- **Single transaction.** All inserts and junction links happen inside one Postgres transaction. A failure mid-batch rolls back every row from this upload.
+
+#### Example: minimal happy CSV
+
+```csv
+name,slug,country,continent,city,institution_type,campus_setting,contact_email,website,overview,degree_levels,majors
+Massachusetts Institute of Technology,mit,US,North America,Cambridge,Private,Urban,admissions@mit.edu,https://www.mit.edu,MIT is a private research university.,Bachelors|Masters|PhD,Computer Science|Mathematics
+```
+
+#### Example request
+
+```bash
+# Draft mode (only name + slug required)
+curl -b cookies.txt \
+  -F "file=@universities.csv" \
+  http://localhost:3000/api/v1/universities/bulk
+
+# Published mode (every required field is validated)
+curl -b cookies.txt \
+  -F "file=@universities.csv" \
+  -F "status=published" \
+  http://localhost:3000/api/v1/universities/bulk
+```
+
+#### Responses
+
+**`200 OK` — partial or full success.** Note this endpoint returns a custom envelope (not the standard `success/data` shape) so the row/column/value triples can render without reshaping on the client.
+
+```json
+{
+  "success": true,
+  "data": {
+    "created": 123,
+    "skipped_existing": 877,
+    "errors": []
+  }
+}
+```
+
+- `created` — number of rows actually inserted.
+- `skipped_existing` — rows whose slug was already in the DB before this upload (admin workflow: re-upload a CSV after appending new rows).
+- `errors` — always present, always an array.
+
+**`400 Bad Request` — validation failure. Nothing was inserted.**
+
+```json
+{
+  "success": false,
+  "data": {
+    "created": 0,
+    "skipped_existing": 0,
+    "errors": [
+      { "row": 12, "column": "tuition_min", "value": "abc", "message": "must be an integer" },
+      { "row": 47, "column": "contact_email", "value": "foo@", "message": "must be a valid email address" },
+      { "row": 88, "column": "degree_levels", "value": "Wizardry", "message": "unknown degree_level 'Wizardry'; valid examples: Bachelors, Masters, PhD, ..." },
+      { "row": 0, "column": "header", "message": "unknown column 'sulg'; valid columns: name, slug, ..." }
+    ]
+  }
+}
+```
+
+- `row` is 1-based; row `0` means the header itself or a file-level problem.
+- `column` is the snake_case header name; `"header"` indicates a header-row issue, `"file"` indicates a file-level issue (empty file, not valid CSV).
+- Error list is capped at 200 entries with a `"...and N more — fix and resubmit"` trailer appended when truncated.
+
+**`400 Bad Request` — file-level errors:**
+- `file is empty` (0-byte upload)
+- `file is not valid CSV: <reason>`
+- `unknown column '<name>'; valid columns: ...` (header typo)
+- `missing required header "name"` / `"slug"`
+- `duplicate header column "<name>"`
+
+**`413 Request Entity Too Large` — file exceeds 20 MiB.**
+
+**`403 Forbidden` — caller is not an admin.**
+
+#### Frontend integration notes
+
+- Use `FormData` (browser) with two fields: the `File` and `status`. Send as `multipart/form-data` with `credentials: 'include'` so the session cookie travels.
+- Display the response counts prominently: `created` and `skipped_existing` together tell the admin what happened. A high `skipped_existing` is fine — it means the CSV was a re-upload.
+- Render the `errors` array as a table keyed by `row` so the admin can open the CSV at the offending line. Each error shows the column name, the offending value, and a human-readable reason — no need to translate.
+- Show a file-size warning before upload if the picked file exceeds ~18 MiB (the 20 MiB cap is hard; UX should prevent the click).
+- Show a status toggle (`draft` / `published`) and call out the difference in helper text: drafts only need name+slug, published validates everything.
+
+#### Minimal React example
+
+```tsx
+async function uploadUniversities(file: File, status: 'draft' | 'published') {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('status', status);
+
+  const res = await fetch('/api/v1/universities/bulk', {
+    method: 'POST',
+    body: form,
+    credentials: 'include',
+  });
+
+  const json = await res.json();
+  // json.data is { created, skipped_existing, errors }
+  // On 200: render counts + (empty) errors table.
+  // On 400: render the errors table; nothing happened server-side.
+  // On 413: file too large.
+  // On 403: user isn't admin.
+  return { status: res.status, body: json.data };
+}
+```
 
 ---
 

@@ -63,3 +63,31 @@ type PublishValidationError struct {
 func (e *PublishValidationError) Error() string {
 	return ErrPublishMissingFields.Error() + ": " + strings.Join(e.Fields, ", ")
 }
+
+// RowError describes a single problem found while parsing one CSV row during
+// a bulk university upload. Row is the 1-based row number in the file (the
+// header is row 0; a Column == "header" failure uses Row = 0). Column is the
+// CSV column name (snake_case as in the file). Value is the offending cell
+// text. Message is a human-readable explanation suitable for showing back to
+// the admin who uploaded the CSV.
+type RowError struct {
+	Row     int    `json:"row"`
+	Column  string `json:"column"`
+	Value   string `json:"value,omitempty"`
+	Message string `json:"message"`
+}
+
+// BulkValidationError is returned by the bulk-upload service when one or
+// more CSV rows fail validation. The handler maps it to a 400 response whose
+// body includes the per-row errors so the admin can fix the file and
+// resubmit.
+type BulkValidationError struct {
+	Errors []RowError
+}
+
+func (e *BulkValidationError) Error() string {
+	if len(e.Errors) == 0 {
+		return "bulk upload validation failed"
+	}
+	return fmt.Sprintf("bulk upload validation failed: %d row error(s) starting at row %d", len(e.Errors), e.Errors[0].Row)
+}
