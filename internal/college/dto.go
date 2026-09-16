@@ -5,7 +5,7 @@ import "time"
 type CreateCollegeRequest struct {
 	Name         string `json:"name"          validate:"required,max=255"`
 	Slug         string `json:"slug"          validate:"required,min=2,max=255"`
-	UniversityID string `json:"university_id" validate:"required,uuid"`
+	UniversityID string `json:"university_id" validate:"omitempty,uuid"`
 	Overview     string `json:"overview"      validate:"required"`
 	Excerpt      string `json:"excerpt"       validate:"omitempty,max=500"`
 
@@ -114,6 +114,7 @@ type UpdateCollegeRequest struct {
 	CampusSize  *string `json:"campus_size"  validate:"omitempty,max=100"`
 	IsPopular   *bool   `json:"is_popular"`
 	IsFeatured  *bool   `json:"is_featured"`
+	UniversityID *string `json:"university_id" validate:"omitempty,uuid"`
 
 	SeoTitle       *string `json:"seo_title"       validate:"omitempty,max=70"`
 	SeoDescription *string `json:"seo_description" validate:"omitempty,max=160"`
@@ -191,4 +192,26 @@ type CollegeSearchResult struct {
 	Logo              string                   `json:"logo"`
 	IsFavorited       bool                     `json:"is_favorited"`
 	HasRepresentative bool                     `json:"has_representative"`
+}
+
+// CollegeRowError describes a single problem found while parsing one CSV
+// row during a bulk college upload. Row is the 1-based row number in the
+// CSV (header is row 0). Column is the CSV column name (snake_case as in
+// the file). Value carries the offending cell so the admin can find it
+// in their file without re-counting rows.
+type CollegeRowError struct {
+	Row     int    `json:"row" example:"12"`
+	Column  string `json:"column" example:"overview"`
+	Value   string `json:"value,omitempty" example:""`
+	Message string `json:"message" example:"is required when status=published"`
+}
+
+// CollegeBulkUploadResponse is the body returned by POST /api/v1/colleges/bulk.
+// Errors is populated on partial-validation failures (some rows blocked the
+// whole upload; nothing was inserted); it is also echoed (empty) on a clean
+// 200 so the shape stays stable for the admin client.
+type CollegeBulkUploadResponse struct {
+	Created         int                `json:"created" example:"123"`
+	SkippedExisting int                `json:"skipped_existing" example:"877"`
+	Errors          []CollegeRowError  `json:"errors"`
 }
