@@ -37,3 +37,6 @@ env.md
 
 # Claude
 .claude/
+
+# Local docs / sample files (regenerable; not part of the source tree)
+docs/
