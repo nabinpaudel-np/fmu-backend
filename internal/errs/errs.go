@@ -29,6 +29,7 @@ var (
 	ErrClaimRoleNotAllowed                = errors.New("only non-student, non-admin users may submit a claim")
 	ErrEmailCannotBeChanged               = errors.New("email cannot be changed via this endpoint; contact FMU admin to update your email")
 	ErrRepOutOfScope                      = errors.New("representative can only edit their own university")
+	ErrRepUniversityIDRequired            = errors.New("representatives must specify a parent university on create")
 	ErrRepCannotChangeNameOrSlug          = errors.New("representatives cannot change name or slug")
 	ErrProgramDegreeNotFound              = errors.New("degree does not exist")
 	ErrPublishMissingFields               = errors.New("missing required fields for publish")
@@ -65,11 +66,11 @@ func (e *PublishValidationError) Error() string {
 }
 
 // RowError describes a single problem found while parsing one CSV row during
-// a bulk university upload. Row is the 1-based row number in the file (the
-// header is row 0; a Column == "header" failure uses Row = 0). Column is the
-// CSV column name (snake_case as in the file). Value is the offending cell
-// text. Message is a human-readable explanation suitable for showing back to
-// the admin who uploaded the CSV.
+// a bulk university or college upload. Row is the 1-based row number in the
+// file (the header is row 0; a Column == "header" failure uses Row = 0).
+// Column is the CSV column name (snake_case as in the file). Value is the
+// offending cell text. Message is a human-readable explanation suitable
+// for showing back to the admin who uploaded the CSV.
 type RowError struct {
 	Row     int    `json:"row"`
 	Column  string `json:"column"`
@@ -78,9 +79,9 @@ type RowError struct {
 }
 
 // BulkValidationError is returned by the bulk-upload service when one or
-// more CSV rows fail validation. The handler maps it to a 400 response whose
-// body includes the per-row errors so the admin can fix the file and
-// resubmit.
+// more CSV rows fail validation. The handler maps it to a 400 response
+// whose body includes the per-row errors so the admin can fix the file
+// and resubmit.
 type BulkValidationError struct {
 	Errors []RowError
 }

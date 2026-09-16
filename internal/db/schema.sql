@@ -735,7 +735,7 @@ CREATE TABLE public.colleges (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     name character varying(255) NOT NULL,
     slug character varying(255) NOT NULL,
-    university_id uuid NOT NULL,
+    university_id uuid,
     overview text NOT NULL,
     excerpt character varying(500),
     country character varying(100),

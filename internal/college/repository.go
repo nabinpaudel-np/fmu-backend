@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -33,6 +34,19 @@ type CollegeRepository interface {
 	GetCollegeDegreeLevels(ctx context.Context, collegeID string) ([]sqlc.DegreeLevel, error)
 	GetCollegeMajors(ctx context.Context, collegeID string) ([]sqlc.Major, error)
 	GetCollegeStudyFormats(ctx context.Context, collegeID string) ([]sqlc.StudyFormat, error)
+	BulkInsertColleges(ctx context.Context, plans []collegeBulkInsertPlan) ([]InsertedCollege, error)
+	ListExistingCollegeSlugs(ctx context.Context, slugs []string) ([]string, error)
+	GetDegreeLevels(ctx context.Context) ([]sqlc.DegreeLevel, error)
+	GetMajors(ctx context.Context) ([]sqlc.Major, error)
+	GetStudyFormats(ctx context.Context) ([]sqlc.StudyFormat, error)
+}
+
+// InsertedCollege is the minimal projection returned by the bulk insert
+// path. The service uses it to reconcile ON CONFLICT skips against the
+// input plan list.
+type InsertedCollege struct {
+	ID   string
+	Slug string
 }
 
 type collegeRepository struct {
@@ -79,7 +93,7 @@ func (r *collegeRepository) Create(ctx context.Context, params sqlc.CreateColleg
 		case errors.As(err, &pgErr) && pgErr.Code == "23505":
 			return sqlc.College{}, fmt.Errorf("%w (slug=%s)", errs.ErrCollegeSlugTaken, params.Slug)
 		case errors.As(err, &pgErr) && pgErr.Code == "23503":
-			return sqlc.College{}, fmt.Errorf("%w (university_id=%s)", errs.ErrCollegeUniversityNotFound, params.UniversityID)
+			return sqlc.College{}, fmt.Errorf("%w (university_id=%s)", errs.ErrCollegeUniversityNotFound, fromPgUUID(params.UniversityID))
 		}
 		return sqlc.College{}, err
 	}
@@ -244,6 +258,14 @@ func (r *collegeRepository) Update(ctx context.Context, id string, req *UpdateCo
 	if req.StudyFormatIDs != nil {
 		collectMissing("study_formats", *req.StudyFormatIDs, q.GetExistingCollegeStudyFormatIDs)
 	}
+	if req.UniversityID != nil {
+		if exists, uErr := universityExists(ctx, tx, *req.UniversityID); uErr != nil {
+			err = uErr
+			return sqlc.College{}, err
+		} else if !exists {
+			missing["universities"] = []string{*req.UniversityID}
+		}
+	}
 	if err != nil {
 		return sqlc.College{}, err
 	}
@@ -336,6 +358,9 @@ func (r *collegeRepository) Update(ctx context.Context, id string, req *UpdateCo
 	}
 	if req.SeoDescription != nil {
 		addSet("seo_description", *req.SeoDescription)
+	}
+	if req.UniversityID != nil {
+		addSet("university_id", toPgUUID(*req.UniversityID))
 	}
 
 	var row sqlc.College
@@ -445,12 +470,13 @@ func (r *collegeRepository) Update(ctx context.Context, id string, req *UpdateCo
 }
 
 func (r *collegeRepository) ListByUniversity(ctx context.Context, universityID string, q pagination.Query) ([]sqlc.College, int64, error) {
-	total, err := r.queries.CountCollegesByUniversity(ctx, universityID)
+	uid := toPgUUID(universityID)
+	total, err := r.queries.CountCollegesByUniversity(ctx, uid)
 	if err != nil {
 		return nil, 0, fmt.Errorf("count colleges by university: %w", err)
 	}
 	rows, err := r.queries.ListCollegesByUniversity(ctx, sqlc.ListCollegesByUniversityParams{
-		UniversityID: universityID,
+		UniversityID: uid,
 		Limit:        int32(q.Limit()),
 		Offset:       int32(q.Offset()),
 	})
@@ -509,6 +535,18 @@ func (r *collegeRepository) GetCollegeStudyFormats(ctx context.Context, collegeI
 	return r.queries.GetCollegeStudyFormats(ctx, collegeID)
 }
 
+func (r *collegeRepository) GetDegreeLevels(ctx context.Context) ([]sqlc.DegreeLevel, error) {
+	return r.queries.GetDegreeLevels(ctx)
+}
+
+func (r *collegeRepository) GetMajors(ctx context.Context) ([]sqlc.Major, error) {
+	return r.queries.GetMajors(ctx)
+}
+
+func (r *collegeRepository) GetStudyFormats(ctx context.Context) ([]sqlc.StudyFormat, error) {
+	return r.queries.GetStudyFormats(ctx)
+}
+
 // validateCollegeReferences returns a map of resource name → missing IDs
 // for each lookup table referenced by ids. An empty map (and nil error)
 // means every requested ID exists. Mirrors university.validateReferences but
@@ -562,4 +600,219 @@ func findMissing(existing, requested []string) []string {
 		}
 	}
 	return missing
+}
+
+// universityExists reports whether a row with the supplied UUID exists in
+// the universities table. Used by Update to validate an orphan college's
+// new parent before flipping the FK — a malformed UUID or unknown parent
+// surfaces as an InvalidReferencesError instead of a 23503 FK violation
+// at COMMIT time, so the admin gets a clear error message.
+func universityExists(ctx context.Context, tx pgx.Tx, id string) (bool, error) {
+	var found bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM universities WHERE id = $1)`, id).Scan(&found); err != nil {
+		return false, err
+	}
+	return found, nil
+}
+
+// ListExistingCollegeSlugs returns the subset of slugs that already exist
+// in the colleges table. Used by the bulk-upload service to skip
+// already-imported rows so re-uploading the same CSV is a no-op rather
+// than a duplicate-key error.
+func (r *collegeRepository) ListExistingCollegeSlugs(ctx context.Context, slugs []string) ([]string, error) {
+	if len(slugs) == 0 {
+		return nil, nil
+	}
+	rows, err := r.queries.ListExistingCollegeSlugs(ctx, slugs)
+	if err != nil {
+		return nil, fmt.Errorf("list existing college slugs: %w", err)
+	}
+	return rows, nil
+}
+
+// collegeBulkInsertPlan is the per-row payload that BulkInsertColleges
+// needs: the column values + the junction IDs to wire up after the row
+// lands. Keeping lookupIDs on the plan avoids re-walking it at
+// junction-insert time.
+type collegeBulkInsertPlan struct {
+	params    sqlc.CreateCollegeParams
+	lookupIDs lookupIDs
+}
+
+// bulkInsertChunkSize bounds the number of VALUES tuples per round-trip.
+// 500 matches the university bulk insert; smaller chunks add overhead,
+// larger ones hit pgx's parameter-array limits.
+const bulkInsertChunkSize = 500
+
+// BulkInsertColleges inserts every supplied college in a single
+// transaction using a chunked multi-row INSERT … ON CONFLICT DO NOTHING.
+// ON CONFLICT swallows the race where another admin inserts the same
+// slug between our pre-flight ListExistingCollegeSlugs check and this
+// call — the row is simply skipped, matching "create colleges that
+// don't exist".
+//
+// Junction rows are inserted per-college using the existing per-row
+// helpers, keyed off the UUIDs Postgres assigns via gen_random_uuid() +
+// RETURNING. This is the same pattern the single-row Create path uses.
+func (r *collegeRepository) BulkInsertColleges(
+	ctx context.Context,
+	rows []collegeBulkInsertPlan,
+) ([]InsertedCollege, error) {
+	if len(rows) == 0 {
+		return nil, nil
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback(ctx)
+		}
+	}()
+
+	q := r.queries.WithTx(tx)
+
+	inserted := make([]InsertedCollege, 0, len(rows))
+	for start := 0; start < len(rows); start += bulkInsertChunkSize {
+		end := start + bulkInsertChunkSize
+		if end > len(rows) {
+			end = len(rows)
+		}
+		chunk := rows[start:end]
+		ids, chunkErr := r.bulkInsertCollegesChunk(ctx, tx, chunk)
+		if chunkErr != nil {
+			err = chunkErr
+			return nil, err
+		}
+		inserted = append(inserted, ids...)
+
+		for i, ins := range ids {
+			plan := chunk[i]
+			if len(plan.lookupIDs.DegreeLevelIDs) > 0 {
+				if err = q.InsertCollegeDegreeLevels(ctx, sqlc.InsertCollegeDegreeLevelsParams{
+					CollegeID: ins.ID,
+					Column2:   plan.lookupIDs.DegreeLevelIDs,
+				}); err != nil {
+					return nil, err
+				}
+			}
+			if len(plan.lookupIDs.MajorIDs) > 0 {
+				if err = q.InsertCollegeMajors(ctx, sqlc.InsertCollegeMajorsParams{
+					CollegeID: ins.ID,
+					Column2:   plan.lookupIDs.MajorIDs,
+				}); err != nil {
+					return nil, err
+				}
+			}
+			if len(plan.lookupIDs.StudyFormatIDs) > 0 {
+				if err = q.InsertCollegeStudyFormats(ctx, sqlc.InsertCollegeStudyFormatsParams{
+					CollegeID: ins.ID,
+					Column2:   plan.lookupIDs.StudyFormatIDs,
+				}); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return inserted, nil
+}
+
+// bulkInsertCollegesChunk runs one multi-row INSERT for the supplied
+// plans and returns the (id, slug) of every row that actually landed.
+// Rows skipped by ON CONFLICT DO NOTHING don't appear in RETURNING and
+// are absent from the result; the caller accounts for them via
+// len(plan) − len(result).
+//
+// The column order mirrors CreateCollege's INSERT statement. Don't
+// reorder without updating sqlc/queries/colleges.sql in lockstep.
+func (r *collegeRepository) bulkInsertCollegesChunk(
+	ctx context.Context,
+	tx pgx.Tx,
+	plans []collegeBulkInsertPlan,
+) ([]InsertedCollege, error) {
+	if len(plans) == 0 {
+		return nil, nil
+	}
+
+	var b strings.Builder
+	b.WriteString(`INSERT INTO colleges (
+		name, slug, university_id, overview, excerpt,
+		country, continent, state, city, full_location,
+		cover_image, logo, institution_type, campus_setting,
+		contact_email, contact_phone, website, zipcode,
+		founded_year, campus_size, gallery_images,
+		is_popular, is_featured,
+		full_address, maps_url, seo_title, seo_description,
+		status
+	) VALUES `)
+
+	const colsPerRow = 28
+	args := make([]any, 0, len(plans)*colsPerRow)
+	for i, plan := range plans {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		args = append(args,
+			plan.params.Name,
+			plan.params.Slug,
+			plan.params.UniversityID,
+			plan.params.Overview,
+			plan.params.Excerpt,
+			plan.params.Country,
+			plan.params.Continent,
+			plan.params.State,
+			plan.params.City,
+			plan.params.FullLocation,
+			plan.params.CoverImage,
+			plan.params.Logo,
+			plan.params.InstitutionType,
+			plan.params.CampusSetting,
+			plan.params.ContactEmail,
+			plan.params.ContactPhone,
+			plan.params.Website,
+			plan.params.Zipcode,
+			plan.params.FoundedYear,
+			plan.params.CampusSize,
+			plan.params.GalleryImages,
+			plan.params.IsPopular,
+			plan.params.IsFeatured,
+			plan.params.FullAddress,
+			plan.params.MapsUrl,
+			plan.params.SeoTitle,
+			plan.params.SeoDescription,
+			plan.params.Status,
+		)
+		b.WriteByte('(')
+		for j := 0; j < colsPerRow; j++ {
+			if j > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteByte('$')
+			b.WriteString(strconv.Itoa(j + 1 + i*colsPerRow))
+		}
+		b.WriteByte(')')
+	}
+	b.WriteString(` ON CONFLICT (slug) DO NOTHING RETURNING id, slug`)
+
+	rows, err := tx.Query(ctx, b.String(), args...)
+	if err != nil {
+		return nil, fmt.Errorf("bulk insert colleges: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]InsertedCollege, 0, len(plans))
+	for rows.Next() {
+		var ins InsertedCollege
+		if err := rows.Scan(&ins.ID, &ins.Slug); err != nil {
+			return nil, err
+		}
+		out = append(out, ins)
+	}
+	return out, rows.Err()
 }

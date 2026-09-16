@@ -12,7 +12,7 @@ func toCreateCollegeParams(req *CreateCollegeRequest) sqlc.CreateCollegeParams {
 	return sqlc.CreateCollegeParams{
 		Name:            req.Name,
 		Slug:            req.Slug,
-		UniversityID:    req.UniversityID,
+		UniversityID:    toPgUUID(req.UniversityID),
 		Overview:        req.Overview,
 		Excerpt:         stringPtrOrNil(req.Excerpt),
 		Country:         stringPtrOrNil(req.Country),
@@ -53,7 +53,7 @@ func toCreateCollegeResponse(c sqlc.College) *CreateCollegeResponse {
 		ID:              c.ID,
 		Name:            c.Name,
 		Slug:            c.Slug,
-		UniversityID:    c.UniversityID,
+		UniversityID:    fromPgUUID(c.UniversityID),
 		Overview:        c.Overview,
 		Excerpt:         deref(c.Excerpt),
 		Country:         deref(c.Country),
@@ -125,7 +125,7 @@ func toCollegeListItem(c sqlc.College) CollegeListItem {
 		ID:              c.ID,
 		Name:            c.Name,
 		Slug:            c.Slug,
-		UniversityID:    c.UniversityID,
+		UniversityID:    fromPgUUID(c.UniversityID),
 		Country:         deref(c.Country),
 		Continent:       deref(c.Continent),
 		State:           deref(c.State),
@@ -146,8 +146,8 @@ func toCollegeSearchResult(r sqlc.SearchCollegesRow) CollegeSearchResult {
 		Slug: r.Slug,
 		University: CollegeUniversitySummary{
 			ID:   r.UniversityID,
-			Name: r.UniversityName,
-			Slug: r.UniversitySlug,
+			Name: ptrOrEmpty(r.UniversityName),
+			Slug: ptrOrEmpty(r.UniversitySlug),
 			Logo: r.UniversityLogo,
 		},
 		Country: r.Country,
@@ -156,6 +156,13 @@ func toCollegeSearchResult(r sqlc.SearchCollegesRow) CollegeSearchResult {
 		City:    r.City,
 		Logo:    r.Logo,
 	}
+}
+
+func ptrOrEmpty(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 func stringPtrOrNil(s string) *string {
@@ -185,4 +192,22 @@ func derefInt16(p *int16) int32 {
 		return 0
 	}
 	return int32(*p)
+}
+
+func toPgUUID(s string) pgtype.UUID {
+	if s == "" {
+		return pgtype.UUID{}
+	}
+	var u pgtype.UUID
+	if err := u.Scan(s); err != nil {
+		return pgtype.UUID{}
+	}
+	return u
+}
+
+func fromPgUUID(u pgtype.UUID) string {
+	if !u.Valid {
+		return ""
+	}
+	return u.String()
 }

@@ -19,7 +19,7 @@ type College struct {
 	ID              string
 	Name            string
 	Slug            string
-	UniversityID    string
+	UniversityID    pgtype.UUID
 	Overview        string
 	Excerpt         *string
 	Country         *string
