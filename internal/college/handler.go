@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"strings"
 
@@ -25,6 +27,7 @@ var collegeResourceField = map[string]string{
 	"degree_levels": "degree_level_ids",
 	"majors":        "major_ids",
 	"study_formats": "study_format_ids",
+	"universities":  "university_id",
 }
 
 // formatMissingCollegeIDs caps the list at 10 IDs so a payload with hundreds
@@ -152,6 +155,8 @@ func (h *CollegeHandler) Create(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, errs.ErrCollegeSlugTaken):
 			response.Error(w, http.StatusConflict, err.Error())
 		case errors.Is(err, errs.ErrCollegeUniversityNotFound):
+			response.Error(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, errs.ErrRepUniversityIDRequired):
 			response.Error(w, http.StatusBadRequest, err.Error())
 		case errors.Is(err, errs.ErrRepOutOfScope):
 			response.Error(w, http.StatusForbidden, err.Error())
@@ -363,4 +368,100 @@ func isAdmin(ctx context.Context) bool {
 		return false
 	}
 	return claims.Role == auth.RoleAdmin
+}
+
+// BulkUpload handles POST /api/v1/colleges/bulk. Accepts a multipart
+// upload with `file` (the CSV) and an optional `status` form field
+// ("draft" or "published", defaults to "draft"). The whole upload is
+// all-or-nothing: any row that fails validation returns 400 with the
+// per-row error list and nothing is inserted. Rows whose slug is already
+// in the DB are silently skipped (idempotent re-upload).
+//
+// Bulk-uploaded colleges always land with university_id = NULL; admins
+// attach a parent via PATCH /colleges/{id}.
+func (h *CollegeHandler) BulkUpload(w http.ResponseWriter, r *http.Request) {
+	status, err := ValidateStatus(r.FormValue("status"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, MaxCSVBytes)
+	if err := r.ParseMultipartForm(MaxCSVBytes); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			response.Error(w, http.StatusRequestEntityTooLarge,
+				fmt.Sprintf("file exceeds %d bytes", MaxCSVBytes))
+			return
+		}
+		response.Error(w, http.StatusBadRequest, "invalid multipart form")
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "file is required (multipart field 'file')")
+		return
+	}
+	defer file.Close()
+
+	if header.Size <= 0 {
+		response.Error(w, http.StatusBadRequest, "file is empty")
+		return
+	}
+
+	head := make([]byte, 512)
+	n, _ := io.ReadFull(file, head)
+	mime := http.DetectContentType(head[:n])
+	if !strings.HasPrefix(mime, "text/") && mime != "application/csv" && mime != "application/octet-stream" {
+		response.Error(w, http.StatusUnsupportedMediaType,
+			fmt.Sprintf("mime type %s is not allowed (expected CSV)", mime))
+		return
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+
+	parsed := Parse(file, status)
+	if len(parsed.Errors) > 0 {
+		writeCollegeBulkValidationError(w, parsed.Errors)
+		return
+	}
+
+	res, err := h.collegeService.BulkUpload(r.Context(), status, parsed.Rows)
+	if err != nil {
+		var bulkErr *errs.BulkValidationError
+		if errors.As(err, &bulkErr) {
+			writeCollegeBulkValidationError(w, bulkErr.Errors)
+			return
+		}
+		log.Default().Printf("college bulk upload failed: %v", err)
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+
+	response.Success(w, http.StatusOK, res)
+}
+
+// writeCollegeBulkValidationError emits the bulk-upload-specific 400
+// envelope. The shape mirrors the success response (Created,
+// SkippedExisting, Errors[]) so the admin client renders a single row
+// table without re-shaping the JSON.
+func writeCollegeBulkValidationError(w http.ResponseWriter, rowErrs []errs.RowError) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadRequest)
+	_ = json.NewEncoder(w).Encode(&CollegeBulkUploadResponse{
+		Created:         0,
+		SkippedExisting: 0,
+		Errors:          toCollegeRowErrors(rowErrs),
+	})
+}
+
+func toCollegeRowErrors(in []errs.RowError) []CollegeRowError {
+	out := make([]CollegeRowError, len(in))
+	for i, e := range in {
+		out[i] = CollegeRowError{Row: e.Row, Column: e.Column, Value: e.Value, Message: e.Message}
+	}
+	return out
 }
