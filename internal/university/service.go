@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -12,6 +13,7 @@ import (
 	"fmu-backend/internal/db/sqlc"
 	"fmu-backend/internal/errs"
 	"fmu-backend/internal/pagination"
+	"fmu-backend/internal/bulkimport"
 )
 
 type UniversityService interface {
@@ -30,6 +32,7 @@ type UniversityService interface {
 	GetAthletics(ctx context.Context) ([]AthleticResponse, error)
 	GetSupportServices(ctx context.Context) ([]SupportServiceResponse, error)
 	GetAllLookups(ctx context.Context) (*AllLookupsResponse, error)
+	BulkUpload(ctx context.Context, status string, rows []bulkimport.ParsedRow) (*BulkUploadResponse, error)
 }
 
 type universityService struct {
@@ -375,4 +378,217 @@ func (s *universityService) GetAllLookups(ctx context.Context) (*AllLookupsRespo
 		Athletics:           athletics,
 		SupportServices:     supportServices,
 	}, nil
+}
+
+// BulkUpload ingests a stream of already-parsed CSV rows, resolves name
+// lookups, drops rows whose slug is already in the DB, and inserts the
+// remainder inside a single transaction.
+//
+// Failure model:
+//   - Any row that didn't survive parsing (parse errors) is excluded here —
+//     the caller passed them in via errs.BulkValidationError and the handler
+//     already returned 400.
+//   - Any row whose name lookups fail is excluded and surfaces a new row
+//     error — all-or-nothing means we then refuse the whole upload.
+//   - Rows whose slug already exists are silently skipped (idempotency for
+//     the "append rows and re-upload" admin workflow).
+//   - Rows we try to insert but get ON CONFLICT DO NOTHING'd (because
+//     another admin wrote the same slug in between our check and our
+//     insert) bump the skipped_existing count, not created.
+//
+// Returns a *BulkUploadResponse describing what actually happened.
+func (s *universityService) BulkUpload(ctx context.Context, status string, rows []bulkimport.ParsedRow) (*BulkUploadResponse, error) {
+	if len(rows) == 0 {
+		return &BulkUploadResponse{Created: 0, SkippedExisting: 0, Errors: []RowError{}}, nil
+	}
+
+	// 1) Resolve every pipe-separated name list to UUIDs in one DB round-trip
+	//    per lookup table. Unknown names reject the whole upload.
+	validDegreeLevels, err := s.nameLookup(ctx, func(ctx context.Context) ([]namedLookup, error) {
+		rows, err := s.repo.GetDegreeLevels(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]namedLookup, len(rows))
+		for i, r := range rows {
+			out[i] = namedLookup{ID: r.ID, Name: r.Name}
+		}
+		return out, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	validMajors, err := s.nameLookup(ctx, func(ctx context.Context) ([]namedLookup, error) {
+		rows, err := s.repo.GetMajors(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]namedLookup, len(rows))
+		for i, r := range rows {
+			out[i] = namedLookup{ID: r.ID, Name: r.Name}
+		}
+		return out, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	validStudyFormats, err := s.nameLookup(ctx, func(ctx context.Context) ([]namedLookup, error) {
+		rows, err := s.repo.GetStudyFormats(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]namedLookup, len(rows))
+		for i, r := range rows {
+			out[i] = namedLookup{ID: r.ID, Name: r.Name}
+		}
+		return out, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if nameErrs := bulkimport.ResolveNames(rows, validDegreeLevels, validMajors, validStudyFormats); len(nameErrs) > 0 {
+		return nil, &errs.BulkValidationError{Errors: bulkimport.CapErrorCount(nameErrs)}
+	}
+
+	// 2) Idempotency: drop rows whose slug is already in the DB.
+	slugs := make([]string, len(rows))
+	for i, row := range rows {
+		slugs[i] = row.Slug
+	}
+	existing, err := s.repo.ListExistingSlugs(ctx, slugs)
+	if err != nil {
+		return nil, err
+	}
+	existingSet := make(map[string]struct{}, len(existing))
+	for _, s := range existing {
+		existingSet[s] = struct{}{}
+	}
+
+	var (
+		toInsert        []bulkimport.ParsedRow
+		skippedExisting int
+	)
+	for _, row := range rows {
+		if _, dup := existingSet[row.Slug]; dup {
+			skippedExisting++
+			continue
+		}
+		toInsert = append(toInsert, row)
+	}
+
+	// 3) Build plans for the repository. The lookup IDs are now UUIDs that
+	//    the repository's junction helpers will wire up after each row
+	//    lands.
+	plans := make([]bulkInsertPlan, 0, len(toInsert))
+	for _, row := range toInsert {
+		plans = append(plans, bulkInsertPlan{
+			params: toCreateUniversityParams(parsedRowToRequest(row)),
+			lookupIDs: lookupIDs{
+				DegreeLevelIDs: row.DegreeLevelIDs,
+				MajorIDs:       row.MajorIDs,
+				StudyFormatIDs: row.StudyFormatIDs,
+			},
+		})
+	}
+
+	inserted, err := s.repo.BulkInsertUniversities(ctx, plans)
+	if err != nil {
+		return nil, err
+	}
+
+	// 4) Reconcile: rows we tried to insert but were skipped by ON CONFLICT
+	//    (another admin landed the same slug between our SELECT and our
+	//    INSERT) bump skipped_existing, not created.
+	actuallyInserted := len(inserted)
+	raceSkipped := len(plans) - actuallyInserted
+
+	return &BulkUploadResponse{
+		Created:         actuallyInserted,
+		SkippedExisting: skippedExisting + raceSkipped,
+		Errors:          []RowError{},
+	}, nil
+}
+
+// nameLookup fetches a lookup table and returns a lowercase-name → id map
+// for bulkimport.ResolveNames. Centralized so the three calls share one
+// place to handle errors / sort / dedupe.
+func (s *universityService) nameLookup(
+	ctx context.Context,
+	fetch func(ctx context.Context) ([]namedLookup, error),
+) (map[string]string, error) {
+	rows, err := fetch(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(rows))
+	for _, r := range rows {
+		out[strings.ToLower(r.Name)] = r.ID
+	}
+	return out, nil
+}
+
+// namedLookup is the tiny projection nameLookup needs from each sqlc type.
+// sqlc.DegreeLevel, sqlc.Major, and sqlc.StudyFormat all have ID + Name
+// fields, so they convert directly.
+type namedLookup struct {
+	ID   string
+	Name string
+}
+
+// parsedRowToRequest converts a bulkimport.ParsedRow into the
+// CreateUniversityRequest the repository expects. Lives here so the bulk
+// package doesn't need to import the university DTOs (which would cycle).
+func parsedRowToRequest(row bulkimport.ParsedRow) *CreateUniversityRequest {
+	return &CreateUniversityRequest{
+		Name:                     row.Name,
+		Slug:                     row.Slug,
+		Overview:                 row.Overview,
+		Excerpt:                  row.Excerpt,
+		Country:                  row.Country,
+		Continent:                row.Continent,
+		State:                    row.State,
+		City:                     row.City,
+		FullLocation:             row.FullLocation,
+		Zipcode:                  row.Zipcode,
+		CoverImage:               row.CoverImage,
+		Logo:                     row.Logo,
+		InstitutionType:          row.InstitutionType,
+		CampusSetting:            row.CampusSetting,
+		InStateTuition:           row.InStateTuition,
+		OutOfStateTuition:        row.OutOfStateTuition,
+		InternationalTuition:     row.InternationalTuition,
+		TuitionMin:               row.TuitionMin,
+		TuitionMax:               row.TuitionMax,
+		NeedBasedAid:             row.NeedBasedAid,
+		MeritScholarships:        row.MeritScholarships,
+		WorkStudy:                row.WorkStudy,
+		NoApplicationFee:         row.NoApplicationFee,
+		AcceptanceRate:           row.AcceptanceRate,
+		TestingPolicy:            row.TestingPolicy,
+		SatRange:                 row.SatRange,
+		ActRange:                 row.ActRange,
+		OnCampusHousing:          row.OnCampusHousing,
+		FreshmenRequiredOnCampus: row.FreshmenRequiredOnCampus,
+		ContactEmail:             row.ContactEmail,
+		ContactPhone:             row.ContactPhone,
+		Website:                  row.Website,
+		AvgHighSchoolGpa:         row.AvgHighSchoolGpa,
+		FoundedYear:              row.FoundedYear,
+		CampusSize:               row.CampusSize,
+		GalleryImages:            row.GalleryImages,
+		IsPopular:                row.IsPopular,
+		IsFeatured:               row.IsFeatured,
+		MapsUrl:                  row.MapsUrl,
+		FullAddress:              row.FullAddress,
+		EmploymentRate:           row.EmploymentRate,
+		ResearchOutput:           row.ResearchOutput,
+		HousingType:              row.HousingType,
+		SeoTitle:                 row.SeoTitle,
+		SeoDescription:           row.SeoDescription,
+		Status:                   row.Status,
+		DegreeLevelIDs:           row.DegreeLevelIDs,
+		MajorIDs:                 row.MajorIDs,
+		StudyFormatIDs:           row.StudyFormatIDs,
+	}
 }

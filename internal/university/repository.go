@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -45,6 +46,8 @@ type UniversityRepository interface {
 	GetSpecialAffiliations(ctx context.Context) ([]sqlc.SpecialAffiliation, error)
 	GetAthletics(ctx context.Context) ([]sqlc.Athletic, error)
 	GetSupportServices(ctx context.Context) ([]sqlc.SupportService, error)
+	ListExistingSlugs(ctx context.Context, slugs []string) ([]string, error)
+	BulkInsertUniversities(ctx context.Context, plans []bulkInsertPlan) ([]InsertedUniversity, error)
 }
 
 type UniversityStats struct {
@@ -52,6 +55,13 @@ type UniversityStats struct {
 	TotalCountries    int64
 	TotalFeatured     int64
 	TotalPopular      int64
+}
+
+// InsertedUniversity is the minimal projection returned by the bulk insert.
+// We only need id and slug to wire up the junction-table inserts.
+type InsertedUniversity struct {
+	ID   string
+	Slug string
 }
 
 type universityRepository struct {
@@ -801,6 +811,225 @@ func (r *universityRepository) GetAthletics(ctx context.Context) ([]sqlc.Athleti
 
 func (r *universityRepository) GetSupportServices(ctx context.Context) ([]sqlc.SupportService, error) {
 	return r.queries.GetSupportServices(ctx)
+}
+
+// ListExistingSlugs returns the subset of slugs already present in the
+// universities table. The bulk-upload service uses this to silently drop
+// rows that an admin re-imports from an ever-growing CSV.
+func (r *universityRepository) ListExistingSlugs(ctx context.Context, slugs []string) ([]string, error) {
+	if len(slugs) == 0 {
+		return nil, nil
+	}
+	return r.queries.ListExistingSlugs(ctx, slugs)
+}
+
+// bulkInsertChunkSize bounds the number of VALUES tuples per round-trip. 500
+// stays well under Postgres' 65535-parameter limit (the universities INSERT
+// has 46 columns, so 500 × 46 = 23k params).
+const bulkInsertChunkSize = 500
+
+// BulkInsertUniversities inserts every supplied university in a single
+// transaction using a chunked multi-row INSERT … ON CONFLICT DO NOTHING.
+// ON CONFLICT swallows the race where another admin inserts the same slug
+// between our pre-flight ListExistingSlugs check and this call — the row
+// is simply skipped, matching "create universities that don't exist".
+//
+// Junction rows are inserted per-university using the existing per-row
+// helpers, keyed off the UUIDs Postgres assigns via gen_random_uuid() +
+// RETURNING. This is the same pattern the single-row Create path uses; for
+// very large uploads (10k+) a UNNEST-based rewrite would help, but the
+// per-row loop is simpler and reuses tested code.
+func (r *universityRepository) BulkInsertUniversities(
+	ctx context.Context,
+	rows []bulkInsertPlan,
+) ([]InsertedUniversity, error) {
+	if len(rows) == 0 {
+		return nil, nil
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback(ctx)
+		}
+	}()
+
+	q := r.queries.WithTx(tx)
+
+	inserted := make([]InsertedUniversity, 0, len(rows))
+	for start := 0; start < len(rows); start += bulkInsertChunkSize {
+		end := start + bulkInsertChunkSize
+		if end > len(rows) {
+			end = len(rows)
+		}
+		chunk := rows[start:end]
+		ids, chunkErr := r.bulkInsertChunk(ctx, tx, chunk)
+		if chunkErr != nil {
+			err = chunkErr
+			return nil, err
+		}
+		inserted = append(inserted, ids...)
+
+		for i, ins := range ids {
+			plan := chunk[i]
+			if len(plan.lookupIDs.DegreeLevelIDs) > 0 {
+				if err = q.InsertUniversityDegreeLevels(ctx, sqlc.InsertUniversityDegreeLevelsParams{
+					UniversityID: ins.ID,
+					Column2:      plan.lookupIDs.DegreeLevelIDs,
+				}); err != nil {
+					return nil, err
+				}
+			}
+			if len(plan.lookupIDs.MajorIDs) > 0 {
+				if err = q.InsertUniversityMajors(ctx, sqlc.InsertUniversityMajorsParams{
+					UniversityID: ins.ID,
+					Column2:      plan.lookupIDs.MajorIDs,
+				}); err != nil {
+					return nil, err
+				}
+			}
+			if len(plan.lookupIDs.StudyFormatIDs) > 0 {
+				if err = q.InsertUniversityStudyFormats(ctx, sqlc.InsertUniversityStudyFormatsParams{
+					UniversityID: ins.ID,
+					Column2:      plan.lookupIDs.StudyFormatIDs,
+				}); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return inserted, nil
+}
+
+// bulkInsertPlan is the per-row payload that BulkInsertUniversities needs:
+// the column values + the junction IDs to wire up after the row lands.
+// Keeping lookupIDs on the plan avoids re-walking it at junction-insert
+// time.
+type bulkInsertPlan struct {
+	params    sqlc.CreateUniversityParams
+	lookupIDs lookupIDs
+}
+
+// bulkInsertChunk runs one multi-row INSERT for the supplied plans and
+// returns the (id, slug) of every row that actually landed. Rows skipped by
+// ON CONFLICT DO NOTHING don't appear in RETURNING and are absent from the
+// result; the caller accounts for them via len(plan) − len(result).
+func (r *universityRepository) bulkInsertChunk(
+	ctx context.Context,
+	tx pgx.Tx,
+	plans []bulkInsertPlan,
+) ([]InsertedUniversity, error) {
+	if len(plans) == 0 {
+		return nil, nil
+	}
+
+	var b strings.Builder
+	b.WriteString(`INSERT INTO universities (
+		name, slug, overview, excerpt,
+		country, continent, state, city, full_location,
+		cover_image, logo,
+		institution_type, campus_setting,
+		in_state_tuition, out_of_state_tuition, international_tuition,
+		need_based_aid, merit_scholarships, work_study, no_application_fee,
+		acceptance_rate, testing_policy, sat_range, act_range,
+		on_campus_housing, freshmen_required_on_campus,
+		contact_email, contact_phone, website,
+		zipcode, tuition_min, tuition_max, avg_high_school_gpa,
+		founded_year, campus_size, gallery_images,
+		is_popular, is_featured,
+		maps_url, full_address, employment_rate, research_output, housing_type,
+		seo_title, seo_description,
+		status
+	) VALUES `)
+
+	const colsPerRow = 46
+	args := make([]any, 0, len(plans)*colsPerRow)
+	for i, plan := range plans {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		args = append(args,
+			plan.params.Name,
+			plan.params.Slug,
+			plan.params.Overview,
+			plan.params.Excerpt,
+			plan.params.Country,
+			plan.params.Continent,
+			plan.params.State,
+			plan.params.City,
+			plan.params.FullLocation,
+			plan.params.CoverImage,
+			plan.params.Logo,
+			plan.params.InstitutionType,
+			plan.params.CampusSetting,
+			plan.params.InStateTuition,
+			plan.params.OutOfStateTuition,
+			plan.params.InternationalTuition,
+			plan.params.NeedBasedAid,
+			plan.params.MeritScholarships,
+			plan.params.WorkStudy,
+			plan.params.NoApplicationFee,
+			plan.params.AcceptanceRate,
+			plan.params.TestingPolicy,
+			plan.params.SatRange,
+			plan.params.ActRange,
+			plan.params.OnCampusHousing,
+			plan.params.FreshmenRequiredOnCampus,
+			plan.params.ContactEmail,
+			plan.params.ContactPhone,
+			plan.params.Website,
+			plan.params.Zipcode,
+			plan.params.TuitionMin,
+			plan.params.TuitionMax,
+			plan.params.AvgHighSchoolGpa,
+			plan.params.FoundedYear,
+			plan.params.CampusSize,
+			plan.params.GalleryImages,
+			plan.params.IsPopular,
+			plan.params.IsFeatured,
+			plan.params.MapsUrl,
+			plan.params.FullAddress,
+			plan.params.EmploymentRate,
+			plan.params.ResearchOutput,
+			plan.params.HousingType,
+			plan.params.SeoTitle,
+			plan.params.SeoDescription,
+			plan.params.Status,
+		)
+		b.WriteByte('(')
+		for j := 0; j < colsPerRow; j++ {
+			if j > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteByte('$')
+			b.WriteString(strconv.Itoa(j + 1 + i*colsPerRow))
+		}
+		b.WriteByte(')')
+	}
+	b.WriteString(` ON CONFLICT (slug) DO NOTHING RETURNING id, slug`)
+
+	rows, err := tx.Query(ctx, b.String(), args...)
+	if err != nil {
+		return nil, fmt.Errorf("bulk insert universities: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]InsertedUniversity, 0, len(plans))
+	for rows.Next() {
+		var ins InsertedUniversity
+		if err := rows.Scan(&ins.ID, &ins.Slug); err != nil {
+			return nil, err
+		}
+		out = append(out, ins)
+	}
+	return out, rows.Err()
 }
 
 func validateReferences(ctx context.Context, q *sqlc.Queries, ids lookupIDs) (map[string][]string, error) {

@@ -1,0 +1,2 @@
+﻿name,slug,country,continent,city,institution_type,campus_setting,contact_email,website,overview,degree_levels,majors
+BOM University,bom-uni,US,North America,Springfield,Public,Urban,info@bom.edu,https://bom.edu,A university whose CSV header has a UTF-8 BOM.,Bachelors,MATH
