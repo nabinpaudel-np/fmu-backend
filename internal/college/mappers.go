@@ -146,8 +146,8 @@ func toCollegeSearchResult(r sqlc.SearchCollegesRow) CollegeSearchResult {
 		Slug: r.Slug,
 		University: CollegeUniversitySummary{
 			ID:   r.UniversityID,
-			Name: r.UniversityName,
-			Slug: r.UniversitySlug,
+			Name: ptrOrEmpty(r.UniversityName),
+			Slug: ptrOrEmpty(r.UniversitySlug),
 			Logo: r.UniversityLogo,
 		},
 		Country: r.Country,
@@ -156,6 +156,13 @@ func toCollegeSearchResult(r sqlc.SearchCollegesRow) CollegeSearchResult {
 		City:    r.City,
 		Logo:    r.Logo,
 	}
+}
+
+func ptrOrEmpty(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 func stringPtrOrNil(s string) *string {

@@ -7,13 +7,15 @@ package sqlc
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const countCollegesByUniversity = `-- name: CountCollegesByUniversity :one
 SELECT COUNT(*) FROM colleges WHERE university_id = $1
 `
 
-func (q *Queries) CountCollegesByUniversity(ctx context.Context, universityID string) (int64, error) {
+func (q *Queries) CountCollegesByUniversity(ctx context.Context, universityID pgtype.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countCollegesByUniversity, universityID)
 	var count int64
 	err := row.Scan(&count)
@@ -55,7 +57,7 @@ RETURNING
 type CreateCollegeParams struct {
 	Name            string
 	Slug            string
-	UniversityID    string
+	UniversityID    pgtype.UUID
 	Overview        string
 	Excerpt         *string
 	Country         *string
@@ -454,7 +456,7 @@ LIMIT $2 OFFSET $3
 `
 
 type ListCollegesByUniversityParams struct {
-	UniversityID string
+	UniversityID pgtype.UUID
 	Limit        int32
 	Offset       int32
 }
@@ -505,6 +507,33 @@ func (q *Queries) ListCollegesByUniversity(ctx context.Context, arg ListColleges
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listExistingCollegeSlugs = `-- name: ListExistingCollegeSlugs :many
+SELECT slug FROM colleges WHERE slug = ANY($1::text[])
+`
+
+// Returns the subset of $1 that already exist in colleges.slug. Used by the
+// bulk CSV upload to skip rows the admin already imported — re-uploading an
+// ever-growing CSV must not duplicate previously-created rows.
+func (q *Queries) ListExistingCollegeSlugs(ctx context.Context, dollar_1 []string) ([]string, error) {
+	rows, err := q.db.Query(ctx, listExistingCollegeSlugs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var slug string
+		if err := rows.Scan(&slug); err != nil {
+			return nil, err
+		}
+		items = append(items, slug)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -600,7 +629,7 @@ SELECT
     c.id,
     c.name,
     c.slug,
-    u.id AS university_id,
+    CASE WHEN u.id IS NULL THEN '' ELSE u.id::text END AS university_id,
     u.name AS university_name,
     u.slug AS university_slug,
     COALESCE(u.logo, '') AS university_logo,
@@ -611,7 +640,7 @@ SELECT
     COALESCE(c.full_location, '') AS full_location,
     COALESCE(c.logo, '') AS logo
 FROM colleges c
-JOIN universities u ON u.id = c.university_id
+LEFT JOIN universities u ON u.id = c.university_id
 WHERE c.status = 'published'
   AND (similarity(c.name, $1) > 0.2
    OR similarity(c.full_location, $1) > 0.2
@@ -641,8 +670,8 @@ type SearchCollegesRow struct {
 	Name           string
 	Slug           string
 	UniversityID   string
-	UniversityName string
-	UniversitySlug string
+	UniversityName *string
+	UniversitySlug *string
 	UniversityLogo string
 	Country        string
 	Continent      string
@@ -653,11 +682,15 @@ type SearchCollegesRow struct {
 }
 
 // Typo-tolerant search across college + parent-university fields via pg_trgm.
-// JOIN is INNER because college.university_id has ON DELETE RESTRICT and is
-// NOT NULL — every college has exactly one parent university. SELECT re-aliases
-// `u.id AS university_id` so the API response carries the university id once
-// (it equals college.university_id, but reading u.id keeps the join honest).
-// COALESCE keeps nullable columns as plain strings in the row type.
+// LEFT JOIN because college.university_id is nullable (bulk-uploaded orphans
+// have no parent until an admin attaches one via PATCH). For orphans the
+// university-side similarity calls return NULL/false, so the OR short-circuits
+// to college fields only. `u.id` is COALESCEd to ” so the row type can stay
+// `string`; the API surfaces an empty `university.id` for orphans. SELECT
+// re-aliases `u.id AS university_id` so the response carries the university id
+// once (it equals college.university_id when joined, but reading u.id keeps
+// the LEFT JOIN honest). COALESCE keeps nullable columns as plain strings
+// in the row type.
 func (q *Queries) SearchColleges(ctx context.Context, arg SearchCollegesParams) ([]SearchCollegesRow, error) {
 	rows, err := q.db.Query(ctx, searchColleges, arg.Similarity, arg.Limit)
 	if err != nil {
