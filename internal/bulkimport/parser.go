@@ -371,9 +371,12 @@ func decodeRow(record []string, idx map[string]int, line int, status string) (Pa
 	if status == StatusPublished && row.InstitutionType == "" {
 		errs2 = append(errs2, errs.RowError{Row: line, Column: "institution_type", Message: "is required when status=published"})
 	}
+	// campus_setting is optional even when published; admins may import
+	// a row that hasn't been classified yet and fill it in via the
+	// per-university edit endpoint later.
 	row.CampusSetting = strings.TrimSpace(get("campus_setting"))
-	if status == StatusPublished && row.CampusSetting == "" {
-		errs2 = append(errs2, errs.RowError{Row: line, Column: "campus_setting", Message: "is required when status=published"})
+	if utf8Width(row.CampusSetting) > 50 {
+		errs2 = append(errs2, errs.RowError{Row: line, Column: "campus_setting", Value: row.CampusSetting, Message: "must not exceed 50 characters"})
 	}
 
 	// tuition (numeric, optional)
@@ -522,18 +525,14 @@ func decodeRow(record []string, idx map[string]int, line int, status string) (Pa
 
 	// multi-value lookups by name (resolution happens in the service layer
 	// after a single batched DB round-trip per lookup table)
+	// degree_levels / majors / study_formats are optional even when
+	// published — an admin may import a row that's still being
+	// classified. cleanSplit returns nil for blank cells, so a CSV
+	// column that exists with empty values is treated the same as a
+	// missing column.
 	row.DegreeLevelNames = cleanSplit(get("degree_levels"))
 	row.MajorNames = cleanSplit(get("majors"))
 	row.StudyFormatNames = cleanSplit(get("study_formats"))
-
-	if status == StatusPublished {
-		if len(row.DegreeLevelNames) == 0 {
-			errs2 = append(errs2, errs.RowError{Row: line, Column: "degree_levels", Message: "is required (≥1) when status=published"})
-		}
-		if len(row.MajorNames) == 0 {
-			errs2 = append(errs2, errs.RowError{Row: line, Column: "majors", Message: "is required (≥1) when status=published"})
-		}
-	}
 
 	// Drop the row on any error; never insert a row with a known problem.
 	if len(errs2) > 0 {

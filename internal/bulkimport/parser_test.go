@@ -244,6 +244,50 @@ func TestParse_DraftDoesNotRequirePublishedFields(t *testing.T) {
 	}
 }
 
+func TestParse_PublishedAllowsEmptyClassificationFields(t *testing.T) {
+	// campus_setting, degree_levels, and majors are optional even on
+	// publish — admins may import a row that's still being classified
+	// and fill these in via the per-university edit endpoint later.
+	// A CSV that includes the columns but leaves them blank must parse
+	// without error (same as omitting the columns entirely).
+	cases := []struct {
+		name string
+		csv  string
+	}{
+		{
+			name: "columns omitted",
+			csv: "name,slug,country,city,institution_type,overview,contact_email,website\n" +
+				"Acme U,acme-u,US,Springfield,Public,A university.,admissions@acme.edu,https://acme.edu\n",
+		},
+		{
+			name: "columns present but blank",
+			csv: "name,slug,country,city,institution_type,overview,contact_email,website,campus_setting,degree_levels,majors\n" +
+				"Acme U,acme-u,US,Springfield,Public,A university.,admissions@acme.edu,https://acme.edu,,,\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res := Parse(strings.NewReader(tc.csv), StatusPublished)
+			if len(res.Errors) != 0 {
+				t.Fatalf("expected no errors on publish with empty classification fields, got %+v", res.Errors)
+			}
+			if len(res.Rows) != 1 {
+				t.Errorf("expected 1 row, got %d", len(res.Rows))
+			}
+			row := res.Rows[0]
+			if row.CampusSetting != "" {
+				t.Errorf("expected empty CampusSetting, got %q", row.CampusSetting)
+			}
+			if len(row.DegreeLevelNames) != 0 {
+				t.Errorf("expected empty DegreeLevelNames, got %v", row.DegreeLevelNames)
+			}
+			if len(row.MajorNames) != 0 {
+				t.Errorf("expected empty MajorNames, got %v", row.MajorNames)
+			}
+		})
+	}
+}
+
 func TestParse_DraftStillValidatesFormats(t *testing.T) {
 	// Drafts skip required-fields but format rules still fire (cheap,
 	// prevents obvious garbage from entering the DB).
