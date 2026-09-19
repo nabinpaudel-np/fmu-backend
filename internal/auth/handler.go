@@ -3,15 +3,11 @@ package auth
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"fmu-backend/internal/config"
 	"fmu-backend/internal/errs"
 	"fmu-backend/internal/response"
 	"fmu-backend/internal/validator"
 	"net/http"
-	"net/url"
-
-	"golang.org/x/oauth2"
 )
 
 type AuthHandler struct {
@@ -114,74 +110,40 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	response.Success(w, http.StatusOK, res)
 }
 
-// GoogleLogin starts the OAuth flow. Never accepts a `code` — that would
-// let an attacker fixate a victim's session onto their auth code.
-func (h *AuthHandler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
-	state := oauth2.GenerateVerifier()
-	SetOAuthStateCookie(w, h.cfg, state)
-	http.Redirect(w, r, h.authService.GetGoogleAuthURL(state), http.StatusFound)
-}
-
-// GoogleCallback finishes the OAuth flow. Validates state vs the cookie
-// (CSRF), exchanges the code for tokens, and clears the state cookie on
-// every code path so it can't be replayed.
-func (h *AuthHandler) GoogleCallback(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-
-	if oauthErr := q.Get("error"); oauthErr != "" {
-		ClearOAuthStateCookie(w, h.cfg)
-		redirectWithError(w, r, h.authService.FrontendURL(), oauthErr, q.Get("error_description"))
+// GoogleExchange finishes the OAuth flow. The SPA (which initiated the
+// redirect to Google and now holds the `code` from Google's callback)
+// POSTs { code, code_verifier } here. The backend exchanges the code with
+// Google using the verifier (PKCE), looks up or creates the user, and
+// sets the same HttpOnly auth cookies that /auth/login sets. Tokens
+// stay out of the response body — matching the login endpoint's
+// invariant — so the SPA relies entirely on cookies via
+// `credentials: 'include'`.
+func (h *AuthHandler) GoogleExchange(w http.ResponseWriter, r *http.Request) {
+	var req googleExchangeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
-	code := q.Get("code")
-	state := q.Get("state")
-
-	if code == "" {
-		ClearOAuthStateCookie(w, h.cfg)
-		response.Error(w, http.StatusBadRequest, "missing code")
+	if err := validator.Validate.Struct(&req); err != nil {
+		validationErrors := validator.GetValidationErrors(err)
+		response.ValidationError(w, http.StatusBadRequest, validationErrors)
 		return
 	}
-
-	expected := GetOAuthStateCookie(r)
-	if expected == "" || expected != state {
-		ClearOAuthStateCookie(w, h.cfg)
-		response.Error(w, http.StatusUnauthorized, "invalid state")
-		return
-	}
-
-	ClearOAuthStateCookie(w, h.cfg)
 
 	userAgent := r.Header.Get("User-Agent")
-	res, err := h.authService.GoogleLogin(r.Context(), code, state, userAgent)
+	res, err := h.authService.GoogleLogin(r.Context(), req.Code, req.CodeVerifier, req.RedirectURI, userAgent)
 	if err != nil {
 		if errors.Is(err, errs.ErrEmailAlreadyRegistered) {
-			redirectWithError(w, r, h.authService.FrontendURL(), "email_taken", "this email is already registered with password login")
+			response.Error(w, http.StatusConflict, "email already registered with password login")
 			return
 		}
-		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		response.Error(w, http.StatusInternalServerError, "oauth exchange failed")
 		return
 	}
 
 	SetAccessCookie(w, h.cfg, res.AccessToken)
 	SetRefreshCookie(w, h.cfg, res.RefreshToken)
-	http.Redirect(w, r, h.authService.FrontendURL(), http.StatusFound)
-}
-
-func redirectWithError(w http.ResponseWriter, r *http.Request, frontendURL, errCode, errDescription string) {
-	redirect := frontendURL
-	if u, err := url.Parse(frontendURL); err == nil {
-		q := u.Query()
-		q.Set("error", errCode)
-		if errDescription != "" {
-			q.Set("error_description", errDescription)
-		}
-		u.RawQuery = q.Encode()
-		redirect = u.String()
-	} else {
-		redirect = fmt.Sprintf("%s?error=%s&error_description=%s", frontendURL, url.QueryEscape(errCode), url.QueryEscape(errDescription))
-	}
-	http.Redirect(w, r, redirect, http.StatusFound)
+	response.Success(w, http.StatusOK, res)
 }
 
 func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
