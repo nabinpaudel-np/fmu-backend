@@ -13,7 +13,7 @@ import (
 
 type OAuthService interface {
 	GetGoogleAuthURL(state string) string
-	ExchangeGoogleCode(ctx context.Context, code, codeVerifier string) (*GoogleUser, error)
+	ExchangeGoogleCode(ctx context.Context, code, codeVerifier, redirectURI string) (*GoogleUser, error)
 }
 
 type oauthService struct {
@@ -47,8 +47,21 @@ func (s *oauthService) GetGoogleAuthURL(state string) string {
 	)
 }
 
-func (s *oauthService) ExchangeGoogleCode(ctx context.Context, code, codeVerifier string) (*GoogleUser, error) {
-	token, err := s.oauthConfig.Exchange(ctx, code, oauth2.VerifierOption(codeVerifier))
+func (s *oauthService) ExchangeGoogleCode(ctx context.Context, code, codeVerifier, redirectURI string) (*GoogleUser, error) {
+	// RFC 6749 §4.1.3: the redirect_uri sent to the token endpoint MUST
+	// match the one used in the authorization request. The SPA builds the
+	// auth URL itself, so it sends its redirect_uri back with the code
+	// and we echo it here. We construct a fresh config per request rather
+	// than mutating the stored one so concurrent exchanges don't race.
+	exchangeCfg := &oauth2.Config{
+		ClientID:     s.oauthConfig.ClientID,
+		ClientSecret: s.oauthConfig.ClientSecret,
+		RedirectURL:  redirectURI,
+		Scopes:       s.oauthConfig.Scopes,
+		Endpoint:     s.oauthConfig.Endpoint,
+	}
+
+	token, err := exchangeCfg.Exchange(ctx, code, oauth2.VerifierOption(codeVerifier))
 	if err != nil {
 		return nil, errors.New("failed to exchange code with Google")
 	}
