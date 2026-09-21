@@ -160,6 +160,20 @@ type SpecialAffiliation struct {
 	Name string
 }
 
+type StudentProfile struct {
+	UserID           string
+	Budget           *int64
+	IntendedCountry  *string
+	CurrentEducation *string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+type StudentProfileProgram struct {
+	UserID    string
+	ProgramID string
+}
+
 type StudyFormat struct {
 	ID   string
 	Name string
