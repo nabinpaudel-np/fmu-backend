@@ -685,12 +685,13 @@ type SearchCollegesRow struct {
 // LEFT JOIN because college.university_id is nullable (bulk-uploaded orphans
 // have no parent until an admin attaches one via PATCH). For orphans the
 // university-side similarity calls return NULL/false, so the OR short-circuits
-// to college fields only. `u.id` is COALESCEd to ” so the row type can stay
-// `string`; the API surfaces an empty `university.id` for orphans. SELECT
-// re-aliases `u.id AS university_id` so the response carries the university id
-// once (it equals college.university_id when joined, but reading u.id keeps
-// the LEFT JOIN honest). COALESCE keeps nullable columns as plain strings
-// in the row type.
+// to college fields only. `university_id` is CASE'd to ” so the row type can
+// stay `string`; the API surfaces an empty `university.id` for orphans. SELECT
+// re-aliases the parent id so the response carries it once (it equals
+// college.university_id when joined, but reading u.id keeps the LEFT JOIN
+// honest). COALESCE keeps other nullable columns as plain strings in the row
+// type — except `university_name` and `university_slug`, which are inherently
+// nullable after the LEFT JOIN and so land as `*string`.
 func (q *Queries) SearchColleges(ctx context.Context, arg SearchCollegesParams) ([]SearchCollegesRow, error) {
 	rows, err := q.db.Query(ctx, searchColleges, arg.Similarity, arg.Limit)
 	if err != nil {

@@ -876,6 +876,9 @@ const listExistingSlugs = `-- name: ListExistingSlugs :many
 SELECT slug FROM universities WHERE slug = ANY($1::text[])
 `
 
+// Returns the subset of $1 that already exist in universities.slug. Used by
+// the bulk CSV upload to skip rows the admin already imported — re-uploading
+// an ever-growing CSV must not duplicate previously-created rows.
 func (q *Queries) ListExistingSlugs(ctx context.Context, dollar_1 []string) ([]string, error) {
 	rows, err := q.db.Query(ctx, listExistingSlugs, dollar_1)
 	if err != nil {

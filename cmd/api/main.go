@@ -25,6 +25,7 @@ import (
 	"fmu-backend/internal/oauth"
 	"fmu-backend/internal/passwordreset"
 	"fmu-backend/internal/programs"
+	"fmu-backend/internal/studentprofile"
 	"fmu-backend/internal/supabase"
 	"fmu-backend/internal/token"
 	"fmu-backend/internal/university"
@@ -90,6 +91,10 @@ func main() {
 
 	favoritesSvc := favorites.NewService(favoritesRepo, universitySvc, collegeSvc)
 	favoritesHandler := favorites.NewHandler(favoritesSvc)
+
+	profileRepo := studentprofile.NewRepository(queries, pool)
+	profileSvc := studentprofile.NewService(profileRepo, favoritesRepo, universitySvc)
+	profileHandler := studentprofile.NewHandler(profileSvc)
 
 	uniClaimRepo := claim.NewUniversityClaimRepository(queries)
 	colClaimRepo := claim.NewCollegeClaimRepository(queries)
@@ -181,6 +186,7 @@ func main() {
 	uploads.RegisterRoutes(r, uploadsHandler, authMW)
 	college.RegisterRoutes(r, collegeHandler, authMW, adminMW, adminOrRepMW, optionalAuthMW)
 	favorites.RegisterRoutes(r, favoritesHandler, authMW, studentMW)
+	studentprofile.RegisterRoutes(r, profileHandler, authMW, studentMW)
 	claim.RegisterRoutes(r, claimHandler, authMW, adminMW, optionalAuthMW)
 	counselling.RegisterRoutes(r, counsellingHandler, authMW, adminMW, adminOrRepMW)
 	programs.RegisterRoutes(r, programsHandler, authMW, adminMW)
