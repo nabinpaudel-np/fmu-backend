@@ -26,9 +26,10 @@ Backend API for the FMU (Find My University) application. This document covers e
 13. [Claim endpoints](#claim-endpoints)
 14. [Lookup reference data](#lookup-reference-data)
 15. [Program endpoints](#program-endpoints)
-16. [Drafts and publishing](#drafts-and-publishing)
-17. [Frontend integration checklist](#putting-it-all-together--frontend-integration-checklist)
-18. [CORS](#cors)
+16. [Scholarship endpoints](#scholarship-endpoints)
+17. [Drafts and publishing](#drafts-and-publishing)
+18. [Frontend integration checklist](#putting-it-all-together--frontend-integration-checklist)
+19. [CORS](#cors)
 
 ---
 
@@ -2180,7 +2181,7 @@ Setup is one-time: create a Supabase project, create a public bucket named `docu
 
 ## Favorites endpoints
 
-Students can save universities and colleges they like. All endpoints require
+Students can save universities, colleges, and scholarships they like. All endpoints require
 authentication **and** the `student` role — admins get `403`. The favorite
 owner is always the authenticated user; there's no way to favorite on
 someone else's behalf.
@@ -2193,6 +2194,9 @@ someone else's behalf.
 | POST   | `/api/v1/favorites/colleges/{id}`          | Add a college to favorites (idempotent)      |
 | DELETE | `/api/v1/favorites/colleges/{id}`          | Remove a college from favorites (idempotent) |
 | GET    | `/api/v1/favorites/colleges`               | List the authenticated student's favorited colleges (paginated) |
+| POST   | `/api/v1/favorites/scholarships/{id}`      | Add a scholarship to favorites (idempotent)  |
+| DELETE | `/api/v1/favorites/scholarships/{id}`      | Remove a scholarship from favorites (idempotent) |
+| GET    | `/api/v1/favorites/scholarships`           | List the authenticated student's favorited scholarships (paginated) |
 
 ### Add to favorites
 ```bash
@@ -3109,6 +3113,226 @@ curl -X DELETE http://localhost:3000/api/v1/programs/a8b9...-c0d1 \
 ```
 
 Returns `204 No Content` on success, `404` if the id does not exist.
+
+---
+
+## Scholarship endpoints
+
+Scholarships are a filterable public directory of funding opportunities. Reads are public; **create/update/publish/delete are admin-only** in the current version. A scholarship can optionally link to an in-directory provider via `university_id` and/or `college_id`; external providers (Corporation, NGO, Government) are captured with the free-text `provider_*` fields. Multi-value eligibility (education levels, fields of study, demographics) is modeled as junction tables to existing/lookup rows, mirroring universities. Scholarships follow the same `draft` → `published` → `archived` lifecycle as universities/colleges (see [Drafts and publishing](#drafts-and-publishing)).
+
+`internal_notes` is **admin-only**: it is returned on the admin create/update/publish responses and on `GET /{id}` when the caller is an admin, and is stripped from every public response.
+
+| Endpoint                                    | Auth   |
+|---------------------------------------------|--------|
+| `GET /api/v1/scholarships`                  | public |
+| `GET /api/v1/scholarships/search`           | public |
+| `GET /api/v1/scholarships/{id}`             | public |
+| `GET /api/v1/scholarships/lookups`          | public |
+| `GET /api/v1/scholarships/education-levels` | public |
+| `GET /api/v1/scholarships/demographics`     | public |
+| `POST /api/v1/scholarships`                 | admin  |
+| `PATCH /api/v1/scholarships/{id}`           | admin  |
+| `POST /api/v1/scholarships/{id}/publish`    | admin  |
+| `DELETE /api/v1/scholarships/{id}`          | admin  |
+
+### GET `/api/v1/scholarships`
+
+Paginated list with faceted filters. Non-admin callers only ever receive `published` rows (the `status` filter is silently forced to `published`). When a valid session cookie is present, each item carries `is_favorited`.
+
+**Auth:** public (optional — personalizes `is_favorited`)
+
+#### Pagination
+
+| Param       | Type | Default | Notes                     |
+|-------------|------|---------|---------------------------|
+| `page`      | int  | `1`     | 1-indexed                 |
+| `page_size` | int  | `20`    | Max 100 (silently capped) |
+
+#### Filters
+
+All filters AND together; multi-value facets OR internally (match any). Unknown slugs are dropped silently.
+
+| Param                | Type    | Notes                                                                 |
+|----------------------|---------|----------------------------------------------------------------------|
+| `education_levels`   | csv     | Slugs: `high-school-senior`, `undergraduate`, `graduate`, `phd`       |
+| `majors`             | csv     | Field-of-study slugs (same set as universities, e.g. `computer-science`, `nursing`) |
+| `demographics`       | csv     | Slugs: `first-generation`, `women`, `minority`, `veteran`, `lgbtq`, `disability`, `international` |
+| `provider_type`      | slug    | `college-university`, `corporation`, `ngo`, `government`              |
+| `country`            | string  | Exact match; `countries` (csv) also accepted (OR)                    |
+| `state`, `city`      | string  | Exact match                                                          |
+| `gpa`                | float   | Student's GPA — matches scholarships whose `min_gpa` is null or ≤ this |
+| `award_min`          | float   | `award_min >= value`                                                 |
+| `award_max`          | float   | `award_max <= value`                                                 |
+| `financial_need`     | bool    | `requires_financial_need = value`                                    |
+| `essay_required`     | bool    | `essay_required = value` (e.g. `false` for no-essay scholarships)    |
+| `no_recommendation`  | bool    | `true` → requires zero recommendation letters                       |
+| `portfolio_required` | bool    | `portfolio_required = value`                                         |
+| `renewable`          | bool    | `is_renewable = value`                                               |
+| `deadline_after`     | date/ts | `application_deadline >= value` (RFC3339 or `YYYY-MM-DD`)            |
+| `deadline_before`    | date/ts | `application_deadline <= value`                                      |
+| `open_now`           | bool    | `true` → currently inside the application window                     |
+| `is_popular`         | bool    | `is_popular = value`                                                 |
+| `is_featured`        | bool    | `is_featured = value`                                                |
+| `status`             | string  | Admin only: `draft` / `published` / `archived` / `all`              |
+
+**Example:**
+```bash
+# No-essay STEM scholarships open to undergraduates for a student with a 3.6 GPA
+curl 'http://localhost:3000/api/v1/scholarships?education_levels=undergraduate&majors=computer-science&essay_required=false&gpa=3.6&page=1&page_size=20'
+```
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "5d3b...-a1eb",
+        "title": "STEM Excellence Scholarship",
+        "slug": "stem-excellence-2026",
+        "award_amount": "$5,000",
+        "logo": "",
+        "provider_type": "Corporation",
+        "provider_name": "Acme Corp",
+        "country": "US",
+        "application_deadline": "2026-12-31T23:59:00Z",
+        "min_gpa": 3.5,
+        "requires_financial_need": true,
+        "essay_required": false,
+        "is_renewable": false,
+        "is_popular": false,
+        "is_featured": true,
+        "is_favorited": false
+      }
+    ],
+    "meta": { "page": 1, "page_size": 20, "total": 1, "total_pages": 1 }
+  }
+}
+```
+
+### GET `/api/v1/scholarships/{id}`
+
+Full detail including the resolved `education_levels`, `majors`, and `demographics` arrays plus `is_favorited`. Non-admins receive `404` for non-published rows, and never see `internal_notes`.
+
+**Auth:** public (optional)
+
+### GET `/api/v1/scholarships/search`
+
+Typeahead over scholarship title. Matches case-insensitive substrings (so `stem` finds "STEM Excellence Scholarship") and typo-tolerant trigram similarity. Requires `?q=` (max 200 chars). Only published rows.
+
+**Auth:** public (optional — personalizes `is_favorited`)
+
+```bash
+curl 'http://localhost:3000/api/v1/scholarships/search?q=stem'
+```
+
+### GET `/api/v1/scholarships/lookups`
+
+Bundled reference data for the create/filter forms: `education_levels`, `demographics`, `majors`, and the static `provider_types` list.
+
+**Auth:** public
+
+```json
+{
+  "success": true,
+  "data": {
+    "education_levels": [ { "id": "...", "name": "Undergraduate" } ],
+    "demographics": [ { "id": "...", "name": "First-Generation" } ],
+    "majors": [ { "id": "...", "name": "Computer Science" } ],
+    "provider_types": ["College/University", "Corporation", "NGO", "Government"]
+  }
+}
+```
+
+`GET /api/v1/scholarships/education-levels` and `GET /api/v1/scholarships/demographics` return the individual lists as `{ "items": [...] }`.
+
+### POST `/api/v1/scholarships`
+
+Create a scholarship. Send `"status": "draft"` to save a stub (only `title` + `slug` required); otherwise the full required-field set is enforced. `education_level_ids` / `major_ids` / `demographic_ids` must reference existing lookup rows, and `university_id` / `college_id` (if provided) must reference existing institutions.
+
+**Auth:** admin
+
+```bash
+curl -b cookies.txt -X POST http://localhost:3000/api/v1/scholarships \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "title": "STEM Excellence Scholarship",
+    "slug": "stem-excellence-2026",
+    "description": "For outstanding STEM undergraduates.",
+    "award_amount": "$5,000",
+    "award_min": 1000, "award_max": 5000,
+    "min_gpa": 3.5, "requires_financial_need": true, "country": "US",
+    "application_deadline": "2026-12-31T23:59:00Z",
+    "essay_required": false, "recommendation_letters_required": 2,
+    "transcript_requirement": "official",
+    "application_url": "https://example.com/apply",
+    "provider_type": "Corporation", "provider_name": "Acme Corp",
+    "contact_email": "grants@acme.com",
+    "internal_notes": "Pending verification",
+    "education_level_ids": ["<undergraduate-uuid>"],
+    "major_ids": ["<computer-science-uuid>"],
+    "demographic_ids": ["<first-generation-uuid>"],
+    "is_featured": true,
+    "status": "published"
+  }'
+```
+
+**Required (non-draft):** `title`, `slug`, `description`, `award_amount`. **Draft:** `title` + `slug`.
+
+**Errors:** `409` slug taken · `400` invalid lookup references (per-field, names the missing ids) · `400` linked provider not found · `400` validation.
+
+#### Fields
+
+| Field                             | Type       | Notes                                                                 |
+|-----------------------------------|------------|----------------------------------------------------------------------|
+| `title`                           | string     | Required, ≤255                                                        |
+| `slug`                            | string     | Required, unique, ≤255                                                |
+| `description`                     | text       | Required (non-draft)                                                  |
+| `award_amount`                    | string     | Required (non-draft) — display value, e.g. `"$1,000"` / `"Full Tuition"` |
+| `award_min`, `award_max`          | number     | Optional numeric bounds for range filtering                          |
+| `logo`                            | url        | Optional — Cloudinary URL from the uploads flow                     |
+| `number_of_awards`                | int        | Optional                                                             |
+| `is_renewable`                    | bool       | Default `false`                                                      |
+| `min_gpa`                         | number     | Optional, 0–5                                                        |
+| `requires_financial_need`         | bool       | Default `false`                                                      |
+| `country`, `state`, `city`        | string     | Optional geographic restriction                                     |
+| `application_open_date`           | timestamp  | Optional (RFC3339)                                                  |
+| `application_deadline`            | timestamp  | Optional (RFC3339)                                                  |
+| `award_notification_date`         | timestamp  | Optional (RFC3339)                                                  |
+| `essay_required`                  | bool       | Default `false`                                                     |
+| `essay_prompt`                    | text       | Optional                                                            |
+| `recommendation_letters_required` | int        | Default `0`                                                         |
+| `transcript_requirement`          | enum       | `none` (default) / `official` / `unofficial`                       |
+| `portfolio_required`              | bool       | Default `false`                                                    |
+| `application_url`                 | url        | Optional external application link                                 |
+| `provider_type`                   | string     | Optional (e.g. `College/University`, `Corporation`, `NGO`, `Government`) |
+| `provider_name`                   | string     | Optional                                                           |
+| `contact_email`, `contact_phone`  | string     | Optional                                                           |
+| `internal_notes`                  | text       | **Admin-only** in responses                                        |
+| `university_id`, `college_id`     | uuid       | Optional FK to an in-directory provider                            |
+| `seo_title`, `seo_description`    | string     | Optional, ≤70 / ≤160                                               |
+| `is_popular`, `is_featured`       | bool       | Default `false`                                                    |
+| `education_level_ids`             | uuid[]     | FK → `education_levels`                                            |
+| `major_ids`                       | uuid[]     | FK → `majors`                                                      |
+| `demographic_ids`                 | uuid[]     | FK → `demographics`                                                |
+| `status`                          | enum       | `draft` / `published` (default `published`)                        |
+
+### PATCH `/api/v1/scholarships/{id}`
+
+Partial update. Omitted fields are unchanged. The `*_ids` association arrays are: omit = leave untouched, send `[]` or a list = replace the entire set.
+
+**Auth:** admin
+
+### POST `/api/v1/scholarships/{id}/publish`
+
+Re-validates the required fields (`title`, `slug`, `description`, `award_amount`) and flips `status` to `published`. Returns `400` with the missing fields if any are blank.
+
+**Auth:** admin
+
+### DELETE `/api/v1/scholarships/{id}`
+
+Returns `204 No Content` on success, `404` if the id does not exist. Junction rows and favorites cascade.
+
+**Auth:** admin
 
 ---
 

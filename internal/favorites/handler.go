@@ -126,3 +126,47 @@ func (h *Handler) ListColleges(w http.ResponseWriter, r *http.Request) {
 		Meta:  q.BuildMeta(total),
 	})
 }
+
+func (h *Handler) FavoriteScholarship(w http.ResponseWriter, r *http.Request) {
+	uid, err := userID(r)
+	if err != nil {
+		response.Error(w, http.StatusUnauthorized, errs.ErrUnauthorized.Error())
+		return
+	}
+	if err := h.svc.AddScholarship(r.Context(), uid, chi.URLParam(r, "id")); err != nil {
+		writeErr(w, err)
+		return
+	}
+	response.Success(w, http.StatusOK, nil)
+}
+
+func (h *Handler) UnfavoriteScholarship(w http.ResponseWriter, r *http.Request) {
+	uid, err := userID(r)
+	if err != nil {
+		response.Error(w, http.StatusUnauthorized, errs.ErrUnauthorized.Error())
+		return
+	}
+	if err := h.svc.RemoveScholarship(r.Context(), uid, chi.URLParam(r, "id")); err != nil {
+		writeErr(w, err)
+		return
+	}
+	response.Success(w, http.StatusOK, nil)
+}
+
+func (h *Handler) ListScholarships(w http.ResponseWriter, r *http.Request) {
+	uid, err := userID(r)
+	if err != nil {
+		response.Error(w, http.StatusUnauthorized, errs.ErrUnauthorized.Error())
+		return
+	}
+	q := pagination.Parse(r)
+	items, total, err := h.svc.ListScholarships(r.Context(), uid, q)
+	if err != nil {
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+	response.Success(w, http.StatusOK, pagination.Response[ScholarshipListItem]{
+		Items: items,
+		Meta:  q.BuildMeta(total),
+	})
+}

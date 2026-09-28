@@ -26,3 +26,18 @@ WHERE user_id = $1 AND university_id = ANY($2::uuid[]);
 -- name: ListFavoritedCollegeIDs :many
 SELECT college_id FROM college_favorites
 WHERE user_id = $1 AND college_id = ANY($2::uuid[]);
+
+-- name: AddScholarshipFavorite :exec
+INSERT INTO scholarship_favorites (user_id, scholarship_id)
+VALUES ($1, $2)
+ON CONFLICT (user_id, scholarship_id) DO NOTHING;
+
+-- name: RemoveScholarshipFavorite :exec
+DELETE FROM scholarship_favorites WHERE user_id = $1 AND scholarship_id = $2;
+
+-- name: CountFavoritedScholarships :one
+SELECT COUNT(*) FROM scholarship_favorites WHERE user_id = $1;
+
+-- name: ListFavoritedScholarshipIDs :many
+SELECT scholarship_id FROM scholarship_favorites
+WHERE user_id = $1 AND scholarship_id = ANY($2::uuid[]);

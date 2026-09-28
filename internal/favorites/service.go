@@ -11,6 +11,7 @@ import (
 	"fmu-backend/internal/college"
 	"fmu-backend/internal/errs"
 	"fmu-backend/internal/pagination"
+	"fmu-backend/internal/scholarship"
 	"fmu-backend/internal/university"
 )
 
@@ -22,6 +23,10 @@ type CollegeLookup interface {
 	GetByID(ctx context.Context, id string) (*college.CollegeDetailResponse, error)
 }
 
+type ScholarshipLookup interface {
+	GetByID(ctx context.Context, id string) (*scholarship.ScholarshipDetailResponse, error)
+}
+
 type Service interface {
 	AddUniversity(ctx context.Context, userID, universityID string) error
 	RemoveUniversity(ctx context.Context, userID, universityID string) error
@@ -30,16 +35,21 @@ type Service interface {
 	AddCollege(ctx context.Context, userID, collegeID string) error
 	RemoveCollege(ctx context.Context, userID, collegeID string) error
 	ListColleges(ctx context.Context, userID string, q pagination.Query) ([]college.CollegeListItem, int64, error)
+
+	AddScholarship(ctx context.Context, userID, scholarshipID string) error
+	RemoveScholarship(ctx context.Context, userID, scholarshipID string) error
+	ListScholarships(ctx context.Context, userID string, q pagination.Query) ([]scholarship.ScholarshipListItem, int64, error)
 }
 
 type service struct {
-	repo        Repository
+	repo         Repository
 	universities UniversityLookup
 	colleges     CollegeLookup
+	scholarships ScholarshipLookup
 }
 
-func NewService(repo Repository, unis UniversityLookup, cols CollegeLookup) Service {
-	return &service{repo: repo, universities: unis, colleges: cols}
+func NewService(repo Repository, unis UniversityLookup, cols CollegeLookup, schols ScholarshipLookup) Service {
+	return &service{repo: repo, universities: unis, colleges: cols, scholarships: schols}
 }
 
 // existsUniversity returns ErrNotFound if the university doesn't exist
@@ -125,6 +135,49 @@ func (s *service) ListColleges(ctx context.Context, userID string, q pagination.
 	items, total, err := s.repo.ListColleges(ctx, userID, q)
 	if err != nil {
 		log.Default().Printf("list favorited colleges user=%s: %v", userID, err)
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
+func (s *service) existsScholarship(ctx context.Context, id string) error {
+	_, err := s.scholarships.GetByID(ctx, id)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, errs.ErrNotFound) || errors.Is(err, pgx.ErrNoRows) {
+		return errs.ErrNotFound
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "22P02" {
+		return errs.ErrNotFound
+	}
+	return err
+}
+
+func (s *service) AddScholarship(ctx context.Context, userID, scholarshipID string) error {
+	if err := s.existsScholarship(ctx, scholarshipID); err != nil {
+		return err
+	}
+	if err := s.repo.AddScholarship(ctx, userID, scholarshipID); err != nil {
+		log.Default().Printf("favorite scholarship user=%s scholarship=%s: %v", userID, scholarshipID, err)
+		return err
+	}
+	return nil
+}
+
+func (s *service) RemoveScholarship(ctx context.Context, userID, scholarshipID string) error {
+	if err := s.repo.RemoveScholarship(ctx, userID, scholarshipID); err != nil {
+		log.Default().Printf("unfavorite scholarship user=%s scholarship=%s: %v", userID, scholarshipID, err)
+		return err
+	}
+	return nil
+}
+
+func (s *service) ListScholarships(ctx context.Context, userID string, q pagination.Query) ([]scholarship.ScholarshipListItem, int64, error) {
+	items, total, err := s.repo.ListScholarships(ctx, userID, q)
+	if err != nil {
+		log.Default().Printf("list favorited scholarships user=%s: %v", userID, err)
 		return nil, 0, err
 	}
 	return items, total, nil
