@@ -239,6 +239,27 @@ type StatsResponse struct {
 	TotalPopular      int64 `json:"total_popular" example:"24"`
 }
 
+// RowError is a single problem found in one CSV row during a bulk university
+// upload. Row is the 1-based row number in the CSV (header is row 0). Column
+// is the CSV column name as the admin typed it. Value carries the offending
+// cell so the admin can find it in their file without re-counting rows.
+type RowError struct {
+	Row     int    `json:"row" example:"12"`
+	Column  string `json:"column" example:"tuition_min"`
+	Value   string `json:"value,omitempty" example:"abc"`
+	Message string `json:"message" example:"must be an integer"`
+}
+
+// BulkUploadResponse is the body returned by POST /api/v1/universities/bulk.
+// Errors is populated on partial-validation failures (some rows blocked the
+// whole upload; nothing was inserted); it is also echoed (empty) on a clean
+// 200 so the shape stays stable for the admin client.
+type BulkUploadResponse struct {
+	Created         int        `json:"created" example:"123"`
+	SkippedExisting int        `json:"skipped_existing" example:"877"`
+	Errors          []RowError `json:"errors"`
+}
+
 type CreateUniversityResponse struct {
 	ID                       string    `json:"id"`
 	Name                     string    `json:"name"`

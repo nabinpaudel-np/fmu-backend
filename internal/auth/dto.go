@@ -61,6 +61,12 @@ type (
 
 type LogoutRequest struct{}
 
+type googleExchangeRequest struct {
+	Code         string `json:"code"          validate:"required,min=10"`
+	CodeVerifier string `json:"code_verifier" validate:"required,min=43,max=128"`
+	RedirectURI  string `json:"redirect_uri"  validate:"required,url"`
+}
+
 type MeResponse struct {
 	UserID                     string `json:"user_id" example:"d3b07384-d9a2-4e0a-b71e-1c9f3e3e0a1b"`
 	FullName                   string `json:"full_name" example:"Ada Lovelace"`

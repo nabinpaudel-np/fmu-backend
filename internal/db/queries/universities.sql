@@ -197,6 +197,12 @@ FROM universities u
 JOIN users usr ON usr.representative_university_id = u.id
 WHERE u.id = ANY($1::uuid[]);
 
+-- name: ListExistingSlugs :many
+-- Returns the subset of $1 that already exist in universities.slug. Used by
+-- the bulk CSV upload to skip rows the admin already imported — re-uploading
+-- an ever-growing CSV must not duplicate previously-created rows.
+SELECT slug FROM universities WHERE slug = ANY($1::text[]);
+
 -- name: PublishUniversity :one
 UPDATE universities
 SET status = 'published',

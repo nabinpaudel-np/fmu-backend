@@ -128,6 +128,30 @@ CREATE TABLE public.special_affiliations (
 
 
 --
+-- Name: student_profile; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.student_profile (
+    user_id uuid NOT NULL,
+    budget bigint,
+    intended_country character varying(100),
+    current_education character varying(20),
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: student_profile_programs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.student_profile_programs (
+    user_id uuid NOT NULL,
+    program_id uuid NOT NULL
+);
+
+
+--
 -- Name: study_formats; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -725,7 +749,8 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260730000002'),
     ('20260802000001'),
     ('20260802000002'),
-    ('20260828000001');
+    ('20260828000001'),
+    ('20260921000001');
 
 --
 -- Name: colleges; Type: TABLE; Schema: public; Owner: -
@@ -735,7 +760,7 @@ CREATE TABLE public.colleges (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     name character varying(255) NOT NULL,
     slug character varying(255) NOT NULL,
-    university_id uuid NOT NULL,
+    university_id uuid,
     overview text NOT NULL,
     excerpt character varying(500),
     country character varying(100),
@@ -1186,6 +1211,61 @@ ALTER TABLE ONLY public.users
 --
 
 CREATE INDEX idx_users_representative_college_id ON public.users USING btree (representative_college_id) WHERE representative_college_id IS NOT NULL;
+
+
+--
+-- Name: student_profile student_profile_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.student_profile
+    ADD CONSTRAINT student_profile_pkey PRIMARY KEY (user_id);
+
+
+--
+-- Name: student_profile student_profile_current_education_check; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.student_profile
+    ADD CONSTRAINT student_profile_current_education_check CHECK (((current_education)::text IS NULL OR (current_education)::text = ANY ((ARRAY['8-10'::character varying, '10-12'::character varying, 'bachelors'::character varying, 'masters'::character varying, 'phd'::character varying])::text[])));
+
+
+--
+-- Name: student_profile_programs student_profile_programs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.student_profile_programs
+    ADD CONSTRAINT student_profile_programs_pkey PRIMARY KEY (user_id, program_id);
+
+
+--
+-- Name: student_profile student_profile_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.student_profile
+    ADD CONSTRAINT student_profile_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: student_profile_programs student_profile_programs_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.student_profile_programs
+    ADD CONSTRAINT student_profile_programs_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: student_profile_programs student_profile_programs_program_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.student_profile_programs
+    ADD CONSTRAINT student_profile_programs_program_id_fkey FOREIGN KEY (program_id) REFERENCES public.programs(id) ON DELETE CASCADE;
+
+
+--
+-- Name: idx_student_profile_programs_user_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_student_profile_programs_user_id ON public.student_profile_programs USING btree (user_id);
 
 
 --

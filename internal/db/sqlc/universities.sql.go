@@ -872,6 +872,33 @@ func (q *Queries) InsertUniversitySupportServices(ctx context.Context, arg Inser
 	return err
 }
 
+const listExistingSlugs = `-- name: ListExistingSlugs :many
+SELECT slug FROM universities WHERE slug = ANY($1::text[])
+`
+
+// Returns the subset of $1 that already exist in universities.slug. Used by
+// the bulk CSV upload to skip rows the admin already imported — re-uploading
+// an ever-growing CSV must not duplicate previously-created rows.
+func (q *Queries) ListExistingSlugs(ctx context.Context, dollar_1 []string) ([]string, error) {
+	rows, err := q.db.Query(ctx, listExistingSlugs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var slug string
+		if err := rows.Scan(&slug); err != nil {
+			return nil, err
+		}
+		items = append(items, slug)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRepresentedUniversityIDs = `-- name: ListRepresentedUniversityIDs :many
 SELECT u.id
 FROM universities u

@@ -21,6 +21,11 @@ func RegisterRoutes(
 	// claims).
 	r.With(authMW, adminOrRepMW).Post("/api/v1/colleges", h.Create)
 
+	// Bulk CSV upload is admin-only. Bulk-uploaded colleges land with
+	// university_id = NULL; admins attach a parent later via
+	// PATCH /api/v1/colleges/{id}.
+	r.With(authMW, adminMW).Post("/api/v1/colleges/bulk", h.BulkUpload)
+
 	// Publish is admin-only — it re-runs required-field validation and
 	// flips status to "published". Reps can save drafts but only admins
 	// can promote them.

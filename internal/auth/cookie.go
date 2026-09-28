@@ -9,14 +9,11 @@ import (
 )
 
 const (
-	AccessCookieName     = "access_token"
-	RefreshCookieName    = "refresh_token"
-	OAuthStateCookieName = "oauth_state"
+	AccessCookieName  = "access_token"
+	RefreshCookieName = "refresh_token"
 
-	accessCookiePath       = "/"
-	refreshCookiePath      = "/api/v1/auth"
-	oauthStateCookiePath   = "/api/v1/auth/google/callback"
-	oauthStateCookieMaxAge = 10 * time.Minute
+	accessCookiePath  = "/"
+	refreshCookiePath = "/api/v1/auth"
 )
 
 func sameSite(value string) http.SameSite {
@@ -64,20 +61,12 @@ func SetRefreshCookie(w http.ResponseWriter, cfg *config.Config, token string) {
 	setCookie(w, cfg, RefreshCookieName, token, refreshCookiePath, cfg.RefreshTokenExpiry)
 }
 
-func SetOAuthStateCookie(w http.ResponseWriter, cfg *config.Config, state string) {
-	setCookie(w, cfg, OAuthStateCookieName, state, oauthStateCookiePath, oauthStateCookieMaxAge)
-}
-
 func ClearAccessCookie(w http.ResponseWriter, cfg *config.Config) {
 	clearCookie(w, cfg, AccessCookieName, accessCookiePath)
 }
 
 func ClearRefreshCookie(w http.ResponseWriter, cfg *config.Config) {
 	clearCookie(w, cfg, RefreshCookieName, refreshCookiePath)
-}
-
-func ClearOAuthStateCookie(w http.ResponseWriter, cfg *config.Config) {
-	clearCookie(w, cfg, OAuthStateCookieName, oauthStateCookiePath)
 }
 
 func getCookie(r *http.Request, name string) string {
@@ -94,8 +83,4 @@ func GetAccessCookie(r *http.Request) string {
 
 func GetRefreshCookie(r *http.Request) string {
 	return getCookie(r, RefreshCookieName)
-}
-
-func GetOAuthStateCookie(r *http.Request) string {
-	return getCookie(r, OAuthStateCookieName)
 }

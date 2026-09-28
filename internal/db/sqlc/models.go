@@ -19,7 +19,7 @@ type College struct {
 	ID              string
 	Name            string
 	Slug            string
-	UniversityID    string
+	UniversityID    pgtype.UUID
 	Overview        string
 	Excerpt         *string
 	Country         *string
@@ -231,6 +231,20 @@ type ScholarshipMajor struct {
 type SpecialAffiliation struct {
 	ID   string
 	Name string
+}
+
+type StudentProfile struct {
+	UserID           string
+	Budget           *int64
+	IntendedCountry  *string
+	CurrentEducation *string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+type StudentProfileProgram struct {
+	UserID    string
+	ProgramID string
 }
 
 type StudyFormat struct {

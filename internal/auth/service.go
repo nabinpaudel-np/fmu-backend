@@ -15,7 +15,7 @@ type AuthService interface {
 	Register(ctx context.Context, req *RegisterRequest) (*RegisterResponse, error)
 	Login(ctx context.Context, req *LoginRequest, userAgent string) (*LoginResponse, error)
 	Refresh(ctx context.Context, refreshToken string, userAgent string) (*RefreshResponse, error)
-	GoogleLogin(ctx context.Context, code, codeVerifier string, userAgent string) (*LoginResponse, error)
+	GoogleLogin(ctx context.Context, code, codeVerifier, redirectURI string, userAgent string) (*LoginResponse, error)
 	GetGoogleAuthURL(state string) string
 	FrontendURL() string
 	Me(ctx context.Context, userID string) (*MeResponse, error)
@@ -219,8 +219,8 @@ func (s *authService) FrontendURL() string {
 	return s.cfg.FrontendURL
 }
 
-func (s *authService) GoogleLogin(ctx context.Context, code, codeVerifier string, userAgent string) (*LoginResponse, error) {
-	googleUser, err := s.oauthService.ExchangeGoogleCode(ctx, code, codeVerifier)
+func (s *authService) GoogleLogin(ctx context.Context, code, codeVerifier, redirectURI string, userAgent string) (*LoginResponse, error) {
+	googleUser, err := s.oauthService.ExchangeGoogleCode(ctx, code, codeVerifier, redirectURI)
 	if err != nil {
 		return nil, err
 	}

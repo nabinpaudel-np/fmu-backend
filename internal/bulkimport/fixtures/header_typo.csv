@@ -1,0 +1,2 @@
+name,sulg,country,continent,city,institution_type,campus_setting,contact_email,website,overview,degree_levels,majors
+Some University,some-uni,US,North America,Springfield,Public,Urban,info@s.edu,https://s.edu,A university in a CSV with a typo in the slug header.,Bachelors,MATH

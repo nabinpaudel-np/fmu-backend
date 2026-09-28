@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 
 	"fmu-backend/internal/auth"
+	"fmu-backend/internal/bulkimport"
 	"fmu-backend/internal/errs"
 	"fmu-backend/internal/pagination"
 	"fmu-backend/internal/programs"
@@ -180,6 +183,100 @@ func (h *UniversityHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.Success(w, http.StatusCreated, res)
+}
+
+// BulkUpload handles POST /api/v1/universities/bulk. Accepts a multipart
+// upload with `file` (the CSV) and an optional `status` form field
+// ("draft" or "published", defaults to "draft"). The whole upload is
+// all-or-nothing: if any row fails validation the response is a 400 with
+// the per-row error list and nothing is inserted. Rows whose slug is
+// already in the DB are silently skipped (idempotency for the
+// "append-and-reupload" workflow).
+func (h *UniversityHandler) BulkUpload(w http.ResponseWriter, r *http.Request) {
+	status, err := bulkimport.ValidateStatus(r.FormValue("status"))
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, bulkimport.MaxCSVBytes)
+	if err := r.ParseMultipartForm(bulkimport.MaxCSVBytes); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			response.Error(w, http.StatusRequestEntityTooLarge,
+				fmt.Sprintf("file exceeds %d bytes", bulkimport.MaxCSVBytes))
+			return
+		}
+		response.Error(w, http.StatusBadRequest, "invalid multipart form")
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "file is required (multipart field 'file')")
+		return
+	}
+	defer file.Close()
+
+	if header.Size <= 0 {
+		response.Error(w, http.StatusBadRequest, "file is empty")
+		return
+	}
+
+	head := make([]byte, 512)
+	n, _ := io.ReadFull(file, head)
+	mime := http.DetectContentType(head[:n])
+	if !strings.HasPrefix(mime, "text/") && mime != "application/csv" && mime != "application/octet-stream" {
+		response.Error(w, http.StatusUnsupportedMediaType,
+			fmt.Sprintf("mime type %s is not allowed (expected CSV)", mime))
+		return
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+
+	parsed := bulkimport.Parse(file, status)
+	if len(parsed.Errors) > 0 {
+		writeBulkValidationError(w, parsed.Errors)
+		return
+	}
+
+	res, err := h.universityService.BulkUpload(r.Context(), status, parsed.Rows)
+	if err != nil {
+		var bulkErr *errs.BulkValidationError
+		if errors.As(err, &bulkErr) {
+			writeBulkValidationError(w, bulkErr.Errors)
+			return
+		}
+		log.Default().Printf("bulk upload failed: %v", err)
+		response.Error(w, http.StatusInternalServerError, "something went wrong")
+		return
+	}
+
+	response.Success(w, http.StatusOK, res)
+}
+
+// writeBulkValidationError emits the bulk-upload-specific 400 envelope.
+// The shape is {created, skipped_existing, errors[]} rather than the
+// generic APIResponse {success, errors[]} so the admin client can render
+// the row/column/value triple without re-shaping it.
+func writeBulkValidationError(w http.ResponseWriter, rowErrs []errs.RowError) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadRequest)
+	_ = json.NewEncoder(w).Encode(&BulkUploadResponse{
+		Created:         0,
+		SkippedExisting: 0,
+		Errors:          toUniversityRowErrors(rowErrs),
+	})
+}
+
+func toUniversityRowErrors(in []errs.RowError) []RowError {
+	out := make([]RowError, len(in))
+	for i, e := range in {
+		out[i] = RowError{Row: e.Row, Column: e.Column, Value: e.Value, Message: e.Message}
+	}
+	return out
 }
 
 func (h *UniversityHandler) Publish(w http.ResponseWriter, r *http.Request) {

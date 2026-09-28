@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -23,6 +24,7 @@ type CollegeService interface {
 	Search(ctx context.Context, q string) ([]CollegeSearchResult, error)
 	RepresentedIDs(ctx context.Context, ids []string) (map[string]struct{}, error)
 	Publish(ctx context.Context, id string) (*CreateCollegeResponse, error)
+	BulkUpload(ctx context.Context, status string, rows []ParsedCollegeRow) (*CollegeBulkUploadResponse, error)
 }
 
 type collegeService struct {
@@ -35,18 +37,24 @@ func NewCollegeService(repo CollegeRepository) CollegeService {
 
 func (s *collegeService) Create(ctx context.Context, req *CreateCollegeRequest) (*CreateCollegeResponse, error) {
 	// Representatives can create colleges only under their own university.
-	// Admins are unrestricted. AuthMiddleware injects claims into ctx so
-	// the body-level scope check lives next to the data write.
+	// Admins are unrestricted and may leave university_id empty to create
+	// an orphan college (assignable later via PATCH). AuthMiddleware
+	// injects claims into ctx so the body-level scope check lives next to
+	// the data write.
 	if claims, err := auth.ClaimsFromContext(ctx); err == nil && claims.Role == auth.RoleRepresentative {
+		if req.UniversityID == "" {
+			return nil, errs.ErrRepUniversityIDRequired
+		}
 		if claims.RepresentativeUniversityID == "" || claims.RepresentativeUniversityID != req.UniversityID {
 			return nil, errs.ErrRepOutOfScope
 		}
 	}
 
 	// Drafts only require name + slug. The CreateCollegeRequest struct has
-	// `validate:"required"` on overview/university_id; for drafts those can
-	// be left blank and the publish endpoint re-validates before flipping
-	// status to "published".
+	// `validate:"required"` on overview; university_id was relaxed to
+	// `omitempty` so admins can stage orphan drafts. The publish endpoint
+	// re-validates the full required-field set before flipping status to
+	// "published" (which still requires a parent university).
 	if req.Status == "draft" {
 		if err := validateDraftCollege(req); err != nil {
 			return nil, err
@@ -118,7 +126,7 @@ func requiredFieldsForCollegePublish(c sqlc.College) []string {
 	if c.Slug == "" {
 		missing = append(missing, "slug")
 	}
-	if c.UniversityID == "" {
+	if !c.UniversityID.Valid {
 		missing = append(missing, "university_id")
 	}
 	if c.Overview == "" {
@@ -228,4 +236,189 @@ func (s *collegeService) RepresentedIDs(ctx context.Context, ids []string) (map[
 		return nil, err
 	}
 	return set, nil
+}
+
+// BulkUpload ingests a stream of already-parsed CSV rows, resolves name
+// lookups, drops rows whose slug is already in the DB, and inserts the
+// remainder inside a single transaction. Failure semantics mirror
+// universityService.BulkUpload (all-or-nothing on validation errors,
+// idempotent on slug). Bulk-uploaded colleges are orphans by design —
+// their university_id is always NULL on insert; admins attach a parent
+// later via PATCH /colleges/{id}.
+func (s *collegeService) BulkUpload(ctx context.Context, status string, rows []ParsedCollegeRow) (*CollegeBulkUploadResponse, error) {
+	if len(rows) == 0 {
+		return &CollegeBulkUploadResponse{
+			Created:         0,
+			SkippedExisting: 0,
+			Errors:          []CollegeRowError{},
+		}, nil
+	}
+
+	validDegreeLevels, err := s.nameLookup(ctx, func(ctx context.Context) ([]namedLookup, error) {
+		rows, err := s.repo.GetDegreeLevels(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]namedLookup, len(rows))
+		for i, r := range rows {
+			out[i] = namedLookup{ID: r.ID, Name: r.Name}
+		}
+		return out, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	validMajors, err := s.nameLookup(ctx, func(ctx context.Context) ([]namedLookup, error) {
+		rows, err := s.repo.GetMajors(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]namedLookup, len(rows))
+		for i, r := range rows {
+			out[i] = namedLookup{ID: r.ID, Name: r.Name}
+		}
+		return out, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	validStudyFormats, err := s.nameLookup(ctx, func(ctx context.Context) ([]namedLookup, error) {
+		rows, err := s.repo.GetStudyFormats(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]namedLookup, len(rows))
+		for i, r := range rows {
+			out[i] = namedLookup{ID: r.ID, Name: r.Name}
+		}
+		return out, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if nameErrs := ResolveNames(rows, validDegreeLevels, validMajors, validStudyFormats); len(nameErrs) > 0 {
+		return nil, &errs.BulkValidationError{Errors: CapErrorCount(nameErrs)}
+	}
+
+	slugs := make([]string, len(rows))
+	for i, row := range rows {
+		slugs[i] = row.Slug
+	}
+	existing, err := s.repo.ListExistingCollegeSlugs(ctx, slugs)
+	if err != nil {
+		return nil, err
+	}
+	existingSet := make(map[string]struct{}, len(existing))
+	for _, slug := range existing {
+		existingSet[slug] = struct{}{}
+	}
+
+	var (
+		toInsert        []ParsedCollegeRow
+		skippedExisting int
+	)
+	for _, row := range rows {
+		if _, dup := existingSet[row.Slug]; dup {
+			skippedExisting++
+			continue
+		}
+		toInsert = append(toInsert, row)
+	}
+
+	plans := make([]collegeBulkInsertPlan, 0, len(toInsert))
+	for _, row := range toInsert {
+		plans = append(plans, collegeBulkInsertPlan{
+			params:    toCreateCollegeParams(parsedRowToRequest(row, status)),
+			lookupIDs: lookupIDsFromParsedRow(row),
+		})
+	}
+
+	inserted, err := s.repo.BulkInsertColleges(ctx, plans)
+	if err != nil {
+		return nil, err
+	}
+
+	actuallyInserted := len(inserted)
+	raceSkipped := len(plans) - actuallyInserted
+
+	return &CollegeBulkUploadResponse{
+		Created:         actuallyInserted,
+		SkippedExisting: skippedExisting + raceSkipped,
+		Errors:          []CollegeRowError{},
+	}, nil
+}
+
+// nameLookup fetches a lookup table and returns a lowercase-name → id map
+// for ResolveNames. Centralized so the three calls share one place to
+// handle errors / case-fold.
+func (s *collegeService) nameLookup(
+	ctx context.Context,
+	fetch func(ctx context.Context) ([]namedLookup, error),
+) (map[string]string, error) {
+	rows, err := fetch(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(rows))
+	for _, r := range rows {
+		out[strings.ToLower(r.Name)] = r.ID
+	}
+	return out, nil
+}
+
+type namedLookup struct {
+	ID   string
+	Name string
+}
+
+// parsedRowToRequest converts a ParsedCollegeRow into the
+// CreateCollegeRequest the repository expects. Lives here so the bulk
+// parser doesn't need to import the college DTOs. UniversityID is left
+// empty — bulk-uploaded colleges are always orphans.
+func parsedRowToRequest(row ParsedCollegeRow, status string) *CreateCollegeRequest {
+	if status == "" {
+		status = StatusDraft
+	}
+	return &CreateCollegeRequest{
+		Name:            row.Name,
+		Slug:            row.Slug,
+		Overview:        row.Overview,
+		Excerpt:         row.Excerpt,
+		Country:         row.Country,
+		Continent:       row.Continent,
+		State:           row.State,
+		City:            row.City,
+		FullLocation:    row.FullLocation,
+		Zipcode:         row.Zipcode,
+		FullAddress:     row.FullAddress,
+		CoverImage:      row.CoverImage,
+		Logo:            row.Logo,
+		MapsUrl:         row.MapsUrl,
+		GalleryImages:   row.GalleryImages,
+		InstitutionType: row.InstitutionType,
+		CampusSetting:   row.CampusSetting,
+		ContactEmail:    row.ContactEmail,
+		ContactPhone:    row.ContactPhone,
+		Website:         row.Website,
+		FoundedYear:     row.FoundedYear,
+		CampusSize:      row.CampusSize,
+		IsPopular:       row.IsPopular,
+		IsFeatured:      row.IsFeatured,
+		SeoTitle:        row.SeoTitle,
+		SeoDescription:  row.SeoDescription,
+		Status:          status,
+		DegreeLevelIDs:  row.DegreeLevelIDs,
+		MajorIDs:        row.MajorIDs,
+		StudyFormatIDs:  row.StudyFormatIDs,
+	}
+}
+
+// lookupIDsFromParsedRow mirrors parsedRowToRequest for the junction IDs.
+func lookupIDsFromParsedRow(row ParsedCollegeRow) lookupIDs {
+	return lookupIDs{
+		DegreeLevelIDs: row.DegreeLevelIDs,
+		MajorIDs:       row.MajorIDs,
+		StudyFormatIDs: row.StudyFormatIDs,
+	}
 }

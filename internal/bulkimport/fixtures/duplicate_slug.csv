@@ -1,0 +1,3 @@
+name,slug,country,continent,city,institution_type,campus_setting,contact_email,website,overview,degree_levels,majors
+First University,duplicate-slug,US,North America,Springfield,Public,Urban,info@a.edu,https://a.edu,First occurrence of the slug.,Bachelors,MATH
+Different Name,duplicate-slug,US,North America,Shelbyville,Public,Urban,info@b.edu,https://b.edu,Second occurrence of the same slug.,Bachelors,MATH
