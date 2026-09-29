@@ -25,6 +25,7 @@ import (
 	"fmu-backend/internal/oauth"
 	"fmu-backend/internal/passwordreset"
 	"fmu-backend/internal/programs"
+	"fmu-backend/internal/scholarship"
 	"fmu-backend/internal/studentprofile"
 	"fmu-backend/internal/supabase"
 	"fmu-backend/internal/token"
@@ -89,7 +90,11 @@ func main() {
 	collegeSvc := college.NewCollegeService(collegeRepo)
 	collegeHandler := college.NewCollegeHandler(collegeSvc, favoritesRepo)
 
-	favoritesSvc := favorites.NewService(favoritesRepo, universitySvc, collegeSvc)
+	scholarshipRepo := scholarship.NewScholarshipRepository(queries, pool)
+	scholarshipSvc := scholarship.NewScholarshipService(scholarshipRepo)
+	scholarshipHandler := scholarship.NewScholarshipHandler(scholarshipSvc, favoritesRepo)
+
+	favoritesSvc := favorites.NewService(favoritesRepo, universitySvc, collegeSvc, scholarshipSvc)
 	favoritesHandler := favorites.NewHandler(favoritesSvc)
 
 	profileRepo := studentprofile.NewRepository(queries, pool)
@@ -190,6 +195,7 @@ func main() {
 	claim.RegisterRoutes(r, claimHandler, authMW, adminMW, optionalAuthMW)
 	counselling.RegisterRoutes(r, counsellingHandler, authMW, adminMW, adminOrRepMW)
 	programs.RegisterRoutes(r, programsHandler, authMW, adminMW)
+	scholarship.RegisterRoutes(r, scholarshipHandler, authMW, adminMW, optionalAuthMW)
 	passwordreset.RegisterRoutes(r, resetHandler)
 
 	server := &http.Server{

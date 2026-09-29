@@ -1379,3 +1379,343 @@ CREATE INDEX idx_password_reset_tokens_user_id ON public.password_reset_tokens U
 
 ALTER TABLE ONLY public.password_reset_tokens
     ADD CONSTRAINT password_reset_tokens_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: education_levels; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.education_levels (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    name character varying(100) NOT NULL
+);
+
+
+--
+-- Name: demographics; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.demographics (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    name character varying(100) NOT NULL
+);
+
+
+--
+-- Name: scholarships; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.scholarships (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    title character varying(255) NOT NULL,
+    slug character varying(255) NOT NULL,
+    description text NOT NULL,
+    award_amount character varying(255) NOT NULL,
+    award_min numeric(12,2),
+    award_max numeric(12,2),
+    logo character varying(500),
+    number_of_awards integer,
+    is_renewable boolean DEFAULT false NOT NULL,
+    min_gpa numeric(4,2),
+    requires_financial_need boolean DEFAULT false NOT NULL,
+    country character varying(100),
+    state character varying(100),
+    city character varying(100),
+    application_open_date timestamp with time zone,
+    application_deadline timestamp with time zone,
+    award_notification_date timestamp with time zone,
+    essay_required boolean DEFAULT false NOT NULL,
+    essay_prompt text,
+    recommendation_letters_required integer DEFAULT 0 NOT NULL,
+    transcript_requirement character varying(20) DEFAULT 'none'::character varying NOT NULL,
+    portfolio_required boolean DEFAULT false NOT NULL,
+    application_url character varying(500),
+    provider_type character varying(50),
+    provider_name character varying(255),
+    contact_email character varying(255),
+    contact_phone character varying(50),
+    internal_notes text,
+    university_id uuid,
+    college_id uuid,
+    seo_title character varying(70),
+    seo_description character varying(160),
+    is_popular boolean DEFAULT false NOT NULL,
+    is_featured boolean DEFAULT false NOT NULL,
+    status character varying(20) DEFAULT 'published'::character varying NOT NULL,
+    published_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT scholarships_status_check CHECK (((status)::text = ANY ((ARRAY['draft'::character varying, 'published'::character varying, 'archived'::character varying])::text[]))),
+    CONSTRAINT scholarships_transcript_requirement_check CHECK (((transcript_requirement)::text = ANY ((ARRAY['none'::character varying, 'official'::character varying, 'unofficial'::character varying])::text[])))
+);
+
+
+--
+-- Name: scholarship_education_levels; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.scholarship_education_levels (
+    scholarship_id uuid NOT NULL,
+    education_level_id uuid NOT NULL
+);
+
+
+--
+-- Name: scholarship_majors; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.scholarship_majors (
+    scholarship_id uuid NOT NULL,
+    major_id uuid NOT NULL
+);
+
+
+--
+-- Name: scholarship_demographics; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.scholarship_demographics (
+    scholarship_id uuid NOT NULL,
+    demographic_id uuid NOT NULL
+);
+
+
+--
+-- Name: scholarship_favorites; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.scholarship_favorites (
+    user_id uuid NOT NULL,
+    scholarship_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: education_levels education_levels_name_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.education_levels
+    ADD CONSTRAINT education_levels_name_key UNIQUE (name);
+
+
+--
+-- Name: education_levels education_levels_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.education_levels
+    ADD CONSTRAINT education_levels_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: demographics demographics_name_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.demographics
+    ADD CONSTRAINT demographics_name_key UNIQUE (name);
+
+
+--
+-- Name: demographics demographics_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.demographics
+    ADD CONSTRAINT demographics_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: scholarships scholarships_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.scholarships
+    ADD CONSTRAINT scholarships_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: scholarships scholarships_slug_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.scholarships
+    ADD CONSTRAINT scholarships_slug_key UNIQUE (slug);
+
+
+--
+-- Name: scholarship_education_levels scholarship_education_levels_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.scholarship_education_levels
+    ADD CONSTRAINT scholarship_education_levels_pkey PRIMARY KEY (scholarship_id, education_level_id);
+
+
+--
+-- Name: scholarship_majors scholarship_majors_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.scholarship_majors
+    ADD CONSTRAINT scholarship_majors_pkey PRIMARY KEY (scholarship_id, major_id);
+
+
+--
+-- Name: scholarship_demographics scholarship_demographics_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.scholarship_demographics
+    ADD CONSTRAINT scholarship_demographics_pkey PRIMARY KEY (scholarship_id, demographic_id);
+
+
+--
+-- Name: scholarship_favorites scholarship_favorites_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.scholarship_favorites
+    ADD CONSTRAINT scholarship_favorites_pkey PRIMARY KEY (user_id, scholarship_id);
+
+
+--
+-- Name: idx_scholarships_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_scholarships_status ON public.scholarships USING btree (status);
+
+
+--
+-- Name: idx_scholarships_application_deadline; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_scholarships_application_deadline ON public.scholarships USING btree (application_deadline);
+
+
+--
+-- Name: idx_scholarships_provider_type; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_scholarships_provider_type ON public.scholarships USING btree (provider_type);
+
+
+--
+-- Name: idx_scholarships_university_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_scholarships_university_id ON public.scholarships USING btree (university_id);
+
+
+--
+-- Name: idx_scholarships_college_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_scholarships_college_id ON public.scholarships USING btree (college_id);
+
+
+--
+-- Name: idx_scholarships_title_trgm; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_scholarships_title_trgm ON public.scholarships USING gin (title gin_trgm_ops);
+
+
+--
+-- Name: idx_scholarship_education_levels_education_level_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_scholarship_education_levels_education_level_id ON public.scholarship_education_levels USING btree (education_level_id);
+
+
+--
+-- Name: idx_scholarship_majors_major_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_scholarship_majors_major_id ON public.scholarship_majors USING btree (major_id);
+
+
+--
+-- Name: idx_scholarship_demographics_demographic_id; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_scholarship_demographics_demographic_id ON public.scholarship_demographics USING btree (demographic_id);
+
+
+--
+-- Name: idx_scholarship_favorites_user_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_scholarship_favorites_user_created ON public.scholarship_favorites USING btree (user_id, created_at DESC);
+
+
+--
+-- Name: scholarships scholarships_university_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.scholarships
+    ADD CONSTRAINT scholarships_university_id_fkey FOREIGN KEY (university_id) REFERENCES public.universities(id) ON DELETE SET NULL;
+
+
+--
+-- Name: scholarships scholarships_college_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.scholarships
+    ADD CONSTRAINT scholarships_college_id_fkey FOREIGN KEY (college_id) REFERENCES public.colleges(id) ON DELETE SET NULL;
+
+
+--
+-- Name: scholarship_education_levels scholarship_education_levels_scholarship_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.scholarship_education_levels
+    ADD CONSTRAINT scholarship_education_levels_scholarship_id_fkey FOREIGN KEY (scholarship_id) REFERENCES public.scholarships(id) ON DELETE CASCADE;
+
+
+--
+-- Name: scholarship_education_levels scholarship_education_levels_education_level_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.scholarship_education_levels
+    ADD CONSTRAINT scholarship_education_levels_education_level_id_fkey FOREIGN KEY (education_level_id) REFERENCES public.education_levels(id) ON DELETE CASCADE;
+
+
+--
+-- Name: scholarship_majors scholarship_majors_scholarship_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.scholarship_majors
+    ADD CONSTRAINT scholarship_majors_scholarship_id_fkey FOREIGN KEY (scholarship_id) REFERENCES public.scholarships(id) ON DELETE CASCADE;
+
+
+--
+-- Name: scholarship_majors scholarship_majors_major_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.scholarship_majors
+    ADD CONSTRAINT scholarship_majors_major_id_fkey FOREIGN KEY (major_id) REFERENCES public.majors(id) ON DELETE CASCADE;
+
+
+--
+-- Name: scholarship_demographics scholarship_demographics_scholarship_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.scholarship_demographics
+    ADD CONSTRAINT scholarship_demographics_scholarship_id_fkey FOREIGN KEY (scholarship_id) REFERENCES public.scholarships(id) ON DELETE CASCADE;
+
+
+--
+-- Name: scholarship_demographics scholarship_demographics_demographic_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.scholarship_demographics
+    ADD CONSTRAINT scholarship_demographics_demographic_id_fkey FOREIGN KEY (demographic_id) REFERENCES public.demographics(id) ON DELETE CASCADE;
+
+
+--
+-- Name: scholarship_favorites scholarship_favorites_scholarship_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.scholarship_favorites
+    ADD CONSTRAINT scholarship_favorites_scholarship_id_fkey FOREIGN KEY (scholarship_id) REFERENCES public.scholarships(id) ON DELETE CASCADE;
+
+
+--
+-- Name: scholarship_favorites scholarship_favorites_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.scholarship_favorites
+    ADD CONSTRAINT scholarship_favorites_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;

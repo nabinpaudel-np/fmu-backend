@@ -19,4 +19,8 @@ func RegisterRoutes(
 	r.With(authMW, studentMW).Post("/api/v1/favorites/colleges/{id}", h.FavoriteCollege)
 	r.With(authMW, studentMW).Delete("/api/v1/favorites/colleges/{id}", h.UnfavoriteCollege)
 	r.With(authMW, studentMW).Get("/api/v1/favorites/colleges", h.ListColleges)
+
+	r.With(authMW, studentMW).Post("/api/v1/favorites/scholarships/{id}", h.FavoriteScholarship)
+	r.With(authMW, studentMW).Delete("/api/v1/favorites/scholarships/{id}", h.UnfavoriteScholarship)
+	r.With(authMW, studentMW).Get("/api/v1/favorites/scholarships", h.ListScholarships)
 }

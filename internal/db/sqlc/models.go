@@ -116,6 +116,16 @@ type DegreeLevel struct {
 	Name string
 }
 
+type Demographic struct {
+	ID   string
+	Name string
+}
+
+type EducationLevel struct {
+	ID   string
+	Name string
+}
+
 type Major struct {
 	ID   string
 	Name string
@@ -153,6 +163,69 @@ type RefreshToken struct {
 
 type SchemaMigration struct {
 	Version string
+}
+
+type Scholarship struct {
+	ID                            string
+	Title                         string
+	Slug                          string
+	Description                   string
+	AwardAmount                   string
+	AwardMin                      pgtype.Numeric
+	AwardMax                      pgtype.Numeric
+	Logo                          *string
+	NumberOfAwards                *int32
+	IsRenewable                   bool
+	MinGpa                        pgtype.Numeric
+	RequiresFinancialNeed         bool
+	Country                       *string
+	State                         *string
+	City                          *string
+	ApplicationOpenDate           pgtype.Timestamptz
+	ApplicationDeadline           pgtype.Timestamptz
+	AwardNotificationDate         pgtype.Timestamptz
+	EssayRequired                 bool
+	EssayPrompt                   *string
+	RecommendationLettersRequired int32
+	TranscriptRequirement         string
+	PortfolioRequired             bool
+	ApplicationUrl                *string
+	ProviderType                  *string
+	ProviderName                  *string
+	ContactEmail                  *string
+	ContactPhone                  *string
+	InternalNotes                 *string
+	UniversityID                  pgtype.UUID
+	CollegeID                     pgtype.UUID
+	SeoTitle                      *string
+	SeoDescription                *string
+	IsPopular                     bool
+	IsFeatured                    bool
+	Status                        string
+	PublishedAt                   pgtype.Timestamptz
+	CreatedAt                     time.Time
+	UpdatedAt                     time.Time
+}
+
+type ScholarshipDemographic struct {
+	ScholarshipID string
+	DemographicID string
+}
+
+type ScholarshipEducationLevel struct {
+	ScholarshipID    string
+	EducationLevelID string
+}
+
+type ScholarshipFavorite struct {
+	UserID        string
+	ScholarshipID string
+	CreatedAt     time.Time
+}
+
+type ScholarshipMajor struct {
+	ScholarshipID string
+	MajorID       string
 }
 
 type SpecialAffiliation struct {

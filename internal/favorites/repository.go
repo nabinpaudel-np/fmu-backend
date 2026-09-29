@@ -9,6 +9,7 @@ import (
 	"fmu-backend/internal/college"
 	"fmu-backend/internal/db/sqlc"
 	"fmu-backend/internal/pagination"
+	"fmu-backend/internal/scholarship"
 	"fmu-backend/internal/university"
 )
 
@@ -22,6 +23,11 @@ type Repository interface {
 	RemoveCollege(ctx context.Context, userID, collegeID string) error
 	ListColleges(ctx context.Context, userID string, q pagination.Query) ([]college.CollegeListItem, int64, error)
 	FavoritedCollegeIDs(ctx context.Context, userID string, ids []string) (map[string]struct{}, error)
+
+	AddScholarship(ctx context.Context, userID, scholarshipID string) error
+	RemoveScholarship(ctx context.Context, userID, scholarshipID string) error
+	ListScholarships(ctx context.Context, userID string, q pagination.Query) ([]scholarship.ScholarshipListItem, int64, error)
+	FavoritedScholarshipIDs(ctx context.Context, userID string, ids []string) (map[string]struct{}, error)
 }
 
 type repository struct {
@@ -214,6 +220,96 @@ func (r *repository) FavoritedCollegeIDs(ctx context.Context, userID string, ids
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list favorited college ids: %w", err)
+	}
+	set := make(map[string]struct{}, len(rows))
+	for _, id := range rows {
+		set[id] = struct{}{}
+	}
+	return set, nil
+}
+
+func (r *repository) AddScholarship(ctx context.Context, userID, scholarshipID string) error {
+	return r.queries.AddScholarshipFavorite(ctx, sqlc.AddScholarshipFavoriteParams{
+		UserID:        userID,
+		ScholarshipID: scholarshipID,
+	})
+}
+
+func (r *repository) RemoveScholarship(ctx context.Context, userID, scholarshipID string) error {
+	return r.queries.RemoveScholarshipFavorite(ctx, sqlc.RemoveScholarshipFavoriteParams{
+		UserID:        userID,
+		ScholarshipID: scholarshipID,
+	})
+}
+
+const listScholarshipsSQL = `
+SELECT
+    s.id,
+    s.title,
+    s.slug,
+    s.award_amount,
+    COALESCE(s.logo, '')          AS logo,
+    COALESCE(s.provider_type, '') AS provider_type,
+    COALESCE(s.provider_name, '') AS provider_name,
+    COALESCE(s.country, '')       AS country,
+    s.application_deadline,
+    COALESCE(s.min_gpa, 0)::float8 AS min_gpa,
+    s.requires_financial_need,
+    s.essay_required,
+    s.is_renewable,
+    s.is_popular,
+    s.is_featured
+FROM scholarship_favorites sf
+JOIN scholarships s ON s.id = sf.scholarship_id
+WHERE sf.user_id = $1
+ORDER BY sf.created_at DESC
+LIMIT $2 OFFSET $3
+`
+
+func (r *repository) ListScholarships(ctx context.Context, userID string, q pagination.Query) ([]scholarship.ScholarshipListItem, int64, error) {
+	total, err := r.queries.CountFavoritedScholarships(ctx, userID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("count favorited scholarships: %w", err)
+	}
+
+	rows, err := r.pool.Query(ctx, listScholarshipsSQL, userID, q.Limit(), q.Offset())
+	if err != nil {
+		return nil, 0, fmt.Errorf("list favorited scholarships: %w", err)
+	}
+	defer rows.Close()
+
+	items := []scholarship.ScholarshipListItem{}
+	for rows.Next() {
+		var s scholarship.ScholarshipListItem
+		if err := rows.Scan(
+			&s.ID, &s.Title, &s.Slug, &s.AwardAmount,
+			&s.Logo, &s.ProviderType, &s.ProviderName, &s.Country,
+			&s.ApplicationDeadline, &s.MinGpa,
+			&s.RequiresFinancialNeed, &s.EssayRequired, &s.IsRenewable,
+			&s.IsPopular, &s.IsFeatured,
+		); err != nil {
+			return nil, 0, fmt.Errorf("scan favorited scholarship: %w", err)
+		}
+		items = append(items, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate favorited scholarships: %w", err)
+	}
+	return items, total, nil
+}
+
+// FavoritedScholarshipIDs returns a set of scholarship IDs from the input slice
+// that the user has favorited.
+func (r *repository) FavoritedScholarshipIDs(ctx context.Context, userID string, ids []string) (map[string]struct{}, error) {
+	if len(ids) == 0 {
+		return map[string]struct{}{}, nil
+	}
+	rows, err := r.queries.ListFavoritedScholarshipIDs(ctx, sqlc.ListFavoritedScholarshipIDsParams{
+		UserID:  userID,
+		Column2: ids,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list favorited scholarship ids: %w", err)
 	}
 	set := make(map[string]struct{}, len(rows))
 	for _, id := range rows {

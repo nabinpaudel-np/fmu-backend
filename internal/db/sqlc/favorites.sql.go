@@ -25,6 +25,22 @@ func (q *Queries) AddCollegeFavorite(ctx context.Context, arg AddCollegeFavorite
 	return err
 }
 
+const addScholarshipFavorite = `-- name: AddScholarshipFavorite :exec
+INSERT INTO scholarship_favorites (user_id, scholarship_id)
+VALUES ($1, $2)
+ON CONFLICT (user_id, scholarship_id) DO NOTHING
+`
+
+type AddScholarshipFavoriteParams struct {
+	UserID        string
+	ScholarshipID string
+}
+
+func (q *Queries) AddScholarshipFavorite(ctx context.Context, arg AddScholarshipFavoriteParams) error {
+	_, err := q.db.Exec(ctx, addScholarshipFavorite, arg.UserID, arg.ScholarshipID)
+	return err
+}
+
 const addUniversityFavorite = `-- name: AddUniversityFavorite :exec
 INSERT INTO university_favorites (user_id, university_id)
 VALUES ($1, $2)
@@ -47,6 +63,17 @@ SELECT COUNT(*) FROM college_favorites WHERE user_id = $1
 
 func (q *Queries) CountFavoritedColleges(ctx context.Context, userID string) (int64, error) {
 	row := q.db.QueryRow(ctx, countFavoritedColleges, userID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countFavoritedScholarships = `-- name: CountFavoritedScholarships :one
+SELECT COUNT(*) FROM scholarship_favorites WHERE user_id = $1
+`
+
+func (q *Queries) CountFavoritedScholarships(ctx context.Context, userID string) (int64, error) {
+	row := q.db.QueryRow(ctx, countFavoritedScholarships, userID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -86,6 +113,36 @@ func (q *Queries) ListFavoritedCollegeIDs(ctx context.Context, arg ListFavorited
 			return nil, err
 		}
 		items = append(items, college_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFavoritedScholarshipIDs = `-- name: ListFavoritedScholarshipIDs :many
+SELECT scholarship_id FROM scholarship_favorites
+WHERE user_id = $1 AND scholarship_id = ANY($2::uuid[])
+`
+
+type ListFavoritedScholarshipIDsParams struct {
+	UserID  string
+	Column2 []string
+}
+
+func (q *Queries) ListFavoritedScholarshipIDs(ctx context.Context, arg ListFavoritedScholarshipIDsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listFavoritedScholarshipIDs, arg.UserID, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var scholarship_id string
+		if err := rows.Scan(&scholarship_id); err != nil {
+			return nil, err
+		}
+		items = append(items, scholarship_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -134,6 +191,20 @@ type RemoveCollegeFavoriteParams struct {
 
 func (q *Queries) RemoveCollegeFavorite(ctx context.Context, arg RemoveCollegeFavoriteParams) error {
 	_, err := q.db.Exec(ctx, removeCollegeFavorite, arg.UserID, arg.CollegeID)
+	return err
+}
+
+const removeScholarshipFavorite = `-- name: RemoveScholarshipFavorite :exec
+DELETE FROM scholarship_favorites WHERE user_id = $1 AND scholarship_id = $2
+`
+
+type RemoveScholarshipFavoriteParams struct {
+	UserID        string
+	ScholarshipID string
+}
+
+func (q *Queries) RemoveScholarshipFavorite(ctx context.Context, arg RemoveScholarshipFavoriteParams) error {
+	_, err := q.db.Exec(ctx, removeScholarshipFavorite, arg.UserID, arg.ScholarshipID)
 	return err
 }
 
