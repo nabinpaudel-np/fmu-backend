@@ -256,3 +256,70 @@ func TestService_SearchOnlyReturnsPublishedRows(t *testing.T) {
 		t.Errorf("expected only the published row, got %d", res.Meta.Total)
 	}
 }
+
+// The catalogue's free-text columns do not spell things one way. A filter
+// that asked for "private" has to find a row that says "private-nonprofit"
+// and a row that says "Private (Non-Profit)" as well, or the search quietly
+// comes back empty.
+func TestService_SearchFindsRowsWhoseValueIsSpelledDifferently(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+
+	country := "NL Search Spelltestland"
+
+	insert := func(name, institutionType string) string {
+		t.Helper()
+		var id string
+		err := pool.QueryRow(ctx,
+			"INSERT INTO universities (name, slug, country, institution_type, status) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+			name, "nl-search-spell-"+name, country, institutionType, "published").Scan(&id)
+		if err != nil {
+			t.Fatalf("insert %s: %v", name, err)
+		}
+		return id
+	}
+
+	slugID := insert("NL Search Slug Private", "private-nonprofit")
+	labelID := insert("NL Search Label Private", "Private (Non-Profit)")
+	publicID := insert("NL Search Public", "public")
+	t.Cleanup(func() {
+		for _, id := range []string{slugID, labelID, publicID} {
+			pool.Exec(ctx, "DELETE FROM universities WHERE id = $1", id)
+		}
+	})
+
+	interpreter := &scriptedInterpreter{
+		entity: "universities",
+		dto: &FilterSetDTO{
+			Entity: "universities",
+			Filters: []FilterDTO{
+				{Field: "country", Op: "=", Value: country},
+				{Field: "institution_type", Op: "=", Value: "private"},
+			},
+		},
+	}
+	svc := NewService(interpreter, NewRepository(pool))
+
+	res, err := svc.Search(ctx, SearchRequest{
+		Query:    "private universities in " + country,
+		Page:     1,
+		PageSize: 50,
+	})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+
+	found := map[string]bool{}
+	for _, item := range res.Items {
+		found[item.ID] = true
+	}
+	if !found[slugID] {
+		t.Error("expected the row spelled private-nonprofit to be found")
+	}
+	if !found[labelID] {
+		t.Error("expected the row spelled Private (Non-Profit) to be found")
+	}
+	if found[publicID] {
+		t.Error("expected the public row to be left out")
+	}
+}

@@ -48,6 +48,10 @@ type Config struct {
 // The key is optional on purpose: the app must still boot without a model,
 // and the endpoint reports that it is unavailable rather than taking the
 // rest of the API down with it.
+//
+// The free tier of the Gemini API allows only a handful of requests a day
+// per model, and the endpoint spends two of them on every search. Enabling
+// billing on the project is what makes the feature usable.
 type GeminiConfig struct {
 	APIKey string `env:"API_KEY"`
 	Model  string `env:"MODEL" envDefault:"gemini-3.8-flash"`

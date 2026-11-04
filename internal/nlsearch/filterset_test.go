@@ -36,10 +36,10 @@ func TestValidate_Rejects(t *testing.T) {
 		{
 			name: "value outside the closed vocabulary",
 			dto: &FilterSetDTO{
-				Entity:  "universities",
-				Filters: []FilterDTO{{Field: "campus_setting", Op: "=", Value: "Suburban-ish"}},
+				Entity:  "scholarships",
+				Filters: []FilterDTO{{Field: "transcript_requirement", Op: "=", Value: "maybe"}},
 			},
-			field: "campus_setting",
+			field: "transcript_requirement",
 		},
 		{
 			name: "sorting by a field that is not sortable",

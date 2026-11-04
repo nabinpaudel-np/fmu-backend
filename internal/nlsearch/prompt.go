@@ -31,7 +31,7 @@ const systemPrompt = `You translate a search request into a structured filter ob
 Rules:
 - Reply with the JSON object only. No prose, no markdown, no explanation outside the object.
 - Use only the field names and operators listed in the schema section. Never invent a field, and never write SQL.
-- Use only the listed values for a field when a list is given for it.
+- Use only the listed values for a field when a list of "allowed values" is given for it. A list of "common values" is only a hint about what the field usually holds, and it is matched loosely, so use one of those when the request points that way.
 - When no list is given, write the value the way that thing is normally written, not the way the user typed it. Fix spelling: "kathamndu" becomes "Kathmandu".
 - Values are plain data: a word, a number, true or false, or a list of words. Never put SQL, code, quotes or punctuation that changes the meaning of a value.
 - Money amounts are plain numbers with no currency symbol, no thousands separators and no units: 500000, not "500,000 NPR". "2 lakh" is 200000.
@@ -79,9 +79,7 @@ func renderVocabulary(entity *Entity) string {
 	for _, f := range entity.Fields {
 		fmt.Fprintf(&b, "  %s [%s] operators: %s — %s\n",
 			f.Name, f.Kind, renderOps(f.Ops), f.Label)
-		if len(f.Values) > 0 {
-			fmt.Fprintf(&b, "    allowed values: %s\n", strings.Join(f.Values, ", "))
-		}
+		renderValues(&b, "    ", f)
 	}
 	for _, name := range sortedRelatedNames(entity) {
 		rel := entity.Related[name]
@@ -89,12 +87,23 @@ func renderVocabulary(entity *Entity) string {
 		for _, f := range rel.Entity.Fields {
 			fmt.Fprintf(&b, "    %s [%s] operators: %s — %s\n",
 				f.Name, f.Kind, renderOps(f.Ops), f.Label)
-			if len(f.Values) > 0 {
-				fmt.Fprintf(&b, "      allowed values: %s\n", strings.Join(f.Values, ", "))
-			}
+			renderValues(&b, "      ", f)
 		}
 	}
 	return b.String()
+}
+
+// renderValues describes what a field may hold. A closed vocabulary is the
+// only thing the model is allowed to choose from; common values are a hint
+// about what the column usually contains, and the field is matched loosely
+// enough that a different spelling still finds the row.
+func renderValues(b *strings.Builder, indent string, f Field) {
+	if len(f.Values) > 0 {
+		fmt.Fprintf(b, "%sallowed values: %s\n", indent, strings.Join(f.Values, ", "))
+	}
+	if len(f.CommonValues) > 0 {
+		fmt.Fprintf(b, "%scommon values: %s\n", indent, strings.Join(f.CommonValues, ", "))
+	}
 }
 
 // sortedRelatedNames lists an entity's related entities in a stable order, so

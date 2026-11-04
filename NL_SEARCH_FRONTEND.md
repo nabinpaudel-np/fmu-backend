@@ -203,13 +203,17 @@ The standard envelope applies: `{ "success": false, "error": "..." }`, with
 | `422` | The question could not be turned into a valid search | Show the error and suggest rephrasing |
 | `429` | Too many searches | Show "slow down"; respect the `Retry-After` header |
 | `502` | The model was reached but could not answer | Show a "try rephrasing" message |
-| `503` | The feature is switched off on the server | Show "search is unavailable right now" |
+| `503` | The feature is switched off on the server, or the model's allowance for the day is spent | Show "search is unavailable right now" |
 | `500` | Anything else | Generic error |
 
-**Handle `503` properly.** It means the backend has no language model
-configured. It is a server configuration state, not a bug, and it is expected
-in local development if `GEMINI_API_KEY` is not set. The page should show a
-clear "not available" state rather than an error toast.
+**Handle `503` properly.** It means one of two things: the backend has no
+language model configured, or the model provider's daily allowance is spent.
+The second is a server-side state, not a bug, and it is expected in local
+development — the free tier of the Gemini API allows only about twenty
+requests a day per model, and a single search spends two of them. The page
+should show a clear "not available" state rather than an error toast, and it
+should not invite the user to rephrase: the question was fine, the server
+simply could not ask the model.
 
 **Handle `429` properly.** The endpoint is rate limited per signed-in user
 (or per IP when signed out): 20 requests per minute, with a burst of 5. The
@@ -389,9 +393,10 @@ says what it is.
 **Results are ranked by relevance** when the question mentions something in
 passing ("universities like Kathmandu University"), otherwise by name.
 
-**The endpoint is slower than a normal search.** It makes a model call before
-it queries the database — expect roughly one to three seconds. Show a loading
-state, and debounce or use a submit button rather than firing on every
+**The endpoint is slower than a normal search.** It makes two model calls
+before it queries the database — one to decide which catalogue the question is
+about, one to turn it into filters. Expect roughly two to six seconds. Show a
+loading state, and debounce or use a submit button rather than firing on every
 keystroke.
 
 ---

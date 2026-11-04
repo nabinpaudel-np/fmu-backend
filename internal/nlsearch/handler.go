@@ -3,6 +3,7 @@ package nlsearch
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 
 	"fmu-backend/internal/response"
@@ -28,6 +29,13 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.svc.Search(r.Context(), req)
 	if err != nil {
+		// The client is told a generic message, so the provider's own
+		// complaint is kept here: this log is the only place the reason
+		// survives. A rejected question is not worth a line — the model
+		// simply did not understand it, and the user can ask again.
+		if !errors.Is(err, ErrEmptyQuery) && !errors.Is(err, ErrQueryTooLong) {
+			log.Printf("nl-search: %v", err)
+		}
 		h.writeError(w, err)
 		return
 	}
@@ -50,6 +58,11 @@ func (h *Handler) writeError(w http.ResponseWriter, err error) {
 		})
 	case errors.Is(err, ErrProviderUnavailable):
 		response.Error(w, http.StatusServiceUnavailable, "natural-language search is not available right now")
+	case errors.Is(err, ErrProviderQuotaExceeded):
+		// The question was fine; the server has spent its allowance for the
+		// day. Telling the user to rephrase would send them off to try the
+		// same question in ten different ways.
+		response.Error(w, http.StatusServiceUnavailable, "natural-language search is temporarily unavailable, please try again later")
 	case errors.Is(err, ErrProviderFailed):
 		response.Error(w, http.StatusBadGateway, "the question could not be understood, please try rephrasing it")
 	default:

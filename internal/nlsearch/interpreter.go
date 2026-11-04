@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"google.golang.org/genai"
@@ -28,6 +29,10 @@ var (
 	// ErrProviderFailed means the model was reached but produced something
 	// unusable. The caller fails closed.
 	ErrProviderFailed = errors.New("language model returned an unusable answer")
+	// ErrProviderQuotaExceeded means the provider's allowance for the day is
+	// spent. The question was fine and no amount of rephrasing will help, so
+	// it is reported as a temporary outage rather than as a bad question.
+	ErrProviderQuotaExceeded = errors.New("language model quota is exhausted")
 )
 
 // InterpretRequest is one question about a known catalogue. Correction
@@ -72,14 +77,21 @@ func NewGeminiInterpreter(ctx context.Context, apiKey, model string) (*GeminiInt
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
 		APIKey: apiKey,
 		// The Gemini API reports a busy model as a 503 and a busy quota as a
-		// 429. Both are momentary, so the request is retried a few times
-		// with a growing delay rather than being reported to the user as a
-		// failure. Without this, a busy model fails every search.
+		// 429. A busy model is momentary, so the request is retried a few
+		// times with a growing delay rather than being reported to the user
+		// as a failure.
+		//
+		// The retryable codes are listed explicitly because the default set
+		// includes 429, and the free tier's allowance is counted in requests
+		// per day: retrying a 429 spends three more of the day's allowance
+		// to reach the same answer. Only the codes worth waiting out are
+		// retried.
 		HTTPOptions: genai.HTTPOptions{
 			RetryOptions: &genai.HTTPRetryOptions{
-				Attempts:     genai.Ptr[int32](4),
-				InitialDelay: genai.Ptr[float64](1),
-				MaxDelay:     genai.Ptr[float64](8),
+				Attempts:        genai.Ptr[int32](4),
+				InitialDelay:    genai.Ptr[float64](1),
+				MaxDelay:        genai.Ptr[float64](8),
+				HTTPStatusCodes: []int32{500, 502, 503, 504},
 			},
 		},
 	})
@@ -97,29 +109,12 @@ func (g *GeminiInterpreter) Classify(ctx context.Context, question string) (*Cla
 		ResponseMIMEType:  "application/json",
 		ResponseSchema:    classifySchema(),
 		MaxOutputTokens:   256,
+		ThinkingConfig:    noThinking(),
 	}
 
-	resp, err := g.client.Models.GenerateContent(
-		ctx,
-		g.model,
-		[]*genai.Content{genai.NewContentFromText(buildClassifyPrompt(question), genai.RoleUser)},
-		config,
-	)
+	text, err := g.generate(ctx, buildClassifyPrompt(question), config)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrProviderFailed, err)
-	}
-	if len(resp.Candidates) == 0 {
-		return nil, ErrProviderFailed
-	}
-
-	candidate := resp.Candidates[0]
-	if candidate.FinishReason != "" && candidate.FinishReason != genai.FinishReasonStop {
-		return nil, fmt.Errorf("%w: model stopped with %s", ErrProviderFailed, candidate.FinishReason)
-	}
-
-	text := candidateText(candidate)
-	if text == "" {
-		return nil, ErrProviderFailed
+		return nil, err
 	}
 
 	var dto struct {
@@ -154,6 +149,7 @@ func (g *GeminiInterpreter) Interpret(ctx context.Context, req InterpretRequest)
 		ResponseMIMEType:  "application/json",
 		ResponseSchema:    filterSetSchema(entity),
 		MaxOutputTokens:   2048,
+		ThinkingConfig:    noThinking(),
 	}
 
 	prompt := buildUserPrompt(entity, req.Question)
@@ -162,27 +158,9 @@ func (g *GeminiInterpreter) Interpret(ctx context.Context, req InterpretRequest)
 			"\nReturn a corrected filter object using only the fields and values listed above."
 	}
 
-	resp, err := g.client.Models.GenerateContent(
-		ctx,
-		g.model,
-		[]*genai.Content{genai.NewContentFromText(prompt, genai.RoleUser)},
-		config,
-	)
+	text, err := g.generate(ctx, prompt, config)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrProviderFailed, err)
-	}
-	if len(resp.Candidates) == 0 {
-		return nil, ErrProviderFailed
-	}
-
-	candidate := resp.Candidates[0]
-	if candidate.FinishReason != "" && candidate.FinishReason != genai.FinishReasonStop {
-		return nil, fmt.Errorf("%w: model stopped with %s", ErrProviderFailed, candidate.FinishReason)
-	}
-
-	text := candidateText(candidate)
-	if text == "" {
-		return nil, ErrProviderFailed
+		return nil, err
 	}
 
 	var dto FilterSetDTO
@@ -193,6 +171,67 @@ func (g *GeminiInterpreter) Interpret(ctx context.Context, req InterpretRequest)
 	// here rather than read from the answer.
 	dto.Entity = entity.Name
 	return &dto, nil
+}
+
+// generate asks the model and returns the text it produced.
+//
+// These models reason before they answer, which costs about ten seconds a
+// question and buys nothing here: the schema already says what the answer
+// must look like, and the fields are chosen by the vocabulary rather than by
+// judgement. The thinking is turned off for that reason.
+//
+// Not every model accepts a thinking configuration. One that refuses the
+// request is asked again without it, so the model can be swapped without
+// also having to be re-tuned.
+func (g *GeminiInterpreter) generate(ctx context.Context, prompt string, config *genai.GenerateContentConfig) (string, error) {
+	contents := []*genai.Content{genai.NewContentFromText(prompt, genai.RoleUser)}
+
+	resp, err := g.client.Models.GenerateContent(ctx, g.model, contents, config)
+	if err != nil && isRefused(err) {
+		withoutThinking := *config
+		withoutThinking.ThinkingConfig = nil
+		resp, err = g.client.Models.GenerateContent(ctx, g.model, contents, &withoutThinking)
+	}
+	if err != nil {
+		return "", providerError(err)
+	}
+	if len(resp.Candidates) == 0 {
+		return "", ErrProviderFailed
+	}
+
+	candidate := resp.Candidates[0]
+	if candidate.FinishReason != "" && candidate.FinishReason != genai.FinishReasonStop {
+		return "", fmt.Errorf("%w: model stopped with %s", ErrProviderFailed, candidate.FinishReason)
+	}
+
+	text := candidateText(candidate)
+	if text == "" {
+		return "", ErrProviderFailed
+	}
+	return text, nil
+}
+
+// noThinking asks the model to answer directly.
+func noThinking() *genai.ThinkingConfig {
+	return &genai.ThinkingConfig{ThinkingBudget: genai.Ptr[int32](0)}
+}
+
+// isRefused reports whether the provider rejected the request itself, as
+// opposed to failing to answer it.
+func isRefused(err error) bool {
+	var apiErr genai.APIError
+	return errors.As(err, &apiErr) && apiErr.Code == http.StatusBadRequest
+}
+
+// providerError classifies a failed model call. A spent quota is worth
+// telling apart from a model that would not answer: the question was fine,
+// and asking it again in the user's own words will not change that.
+func providerError(err error) error {
+	var apiErr genai.APIError
+	if errors.As(err, &apiErr) && apiErr.Code == http.StatusTooManyRequests {
+		return fmt.Errorf("%w: %s", ErrProviderQuotaExceeded, apiErr.Message)
+	}
+	return fmt.Errorf("%w: %v", ErrProviderFailed, err)
 }
 
 // candidateText joins the text parts of a candidate.

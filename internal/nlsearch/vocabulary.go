@@ -68,8 +68,16 @@ type Field struct {
 	// table instead of a plain column comparison.
 	Lookup *Lookup
 	// Values is a closed vocabulary. When set, the model may only pick from
-	// it and the server rejects anything else.
+	// it and the server rejects anything else. Only use it where the column
+	// genuinely holds a controlled set of values.
 	Values []string
+	// CommonValues are the values a field usually holds. They are shown to
+	// the model as guidance but not enforced, because the column they sit in
+	// is free text and what is stored there has not always been written the
+	// same way: one row says "private-nonprofit" and another says "Private".
+	// A field like that is matched loosely, so an exact list would quietly
+	// match nothing.
+	CommonValues []string
 	// Sortable marks a field the results may be ordered by.
 	Sortable bool
 }
@@ -176,17 +184,25 @@ var athleticNames = []string{
 	"Intramural Sports",
 }
 
-var campusSettingNames = []string{"Urban", "Suburban", "Rural"}
+var campusSettingNames = []string{"urban", "suburban", "rural"}
 
+// These three sit in free-text columns. The values below are the ones the
+// catalogue tends to hold; they are guidance for the model rather than a
+// closed list, because a row imported by hand may hold a different spelling
+// of the same thing. The compiler matches them loosely.
 var institutionTypeNames = []string{
-	"Public",
-	"Private (Non-Profit)",
-	"Private (For-Profit)",
-	"2-Year",
-	"4-Year",
+	"public",
+	"private",
+	"2-year",
+	"4-year",
 }
 
-var testingPolicyNames = []string{"Optional", "Blind", "Required"}
+var testingPolicyNames = []string{
+	"test-optional",
+	"test-blind",
+	"test-required",
+	"not required",
+}
 
 var transcriptRequirementNames = []string{"none", "official", "unofficial"}
 
@@ -443,28 +459,28 @@ var universityEntity = &Entity{
 			Column: "u.full_location",
 		},
 		{
-			Name:   "institution_type",
-			Label:  "whether the university is public or private",
-			Kind:   KindString,
-			Ops:    []Op{OpEq, OpNe, OpIn},
-			Column: "u.institution_type",
-			Values: institutionTypeNames,
+			Name:         "institution_type",
+			Label:        "whether the university is public or private",
+			Kind:         KindString,
+			Ops:          []Op{OpEq, OpContains, OpNe},
+			Column:       "u.institution_type",
+			CommonValues: institutionTypeNames,
 		},
 		{
-			Name:   "campus_setting",
-			Label:  "whether the campus is in a city, a suburb or a rural area",
-			Kind:   KindString,
-			Ops:    []Op{OpEq, OpNe, OpIn},
-			Column: "u.campus_setting",
-			Values: campusSettingNames,
+			Name:         "campus_setting",
+			Label:        "whether the campus is in a city, a suburb or a rural area",
+			Kind:         KindString,
+			Ops:          []Op{OpEq, OpContains, OpNe},
+			Column:       "u.campus_setting",
+			CommonValues: campusSettingNames,
 		},
 		{
-			Name:   "testing_policy",
-			Label:  "whether SAT or ACT scores are required, optional or not considered",
-			Kind:   KindString,
-			Ops:    []Op{OpEq, OpNe, OpIn},
-			Column: "u.testing_policy",
-			Values: testingPolicyNames,
+			Name:         "testing_policy",
+			Label:        "whether SAT or ACT scores are required, optional or not considered",
+			Kind:         KindString,
+			Ops:          []Op{OpEq, OpContains, OpNe},
+			Column:       "u.testing_policy",
+			CommonValues: testingPolicyNames,
 		},
 		{
 			Name:   "tuition_min",
@@ -717,20 +733,20 @@ var collegeEntity = &Entity{
 			Column: "c.full_location",
 		},
 		{
-			Name:   "institution_type",
-			Label:  "whether the college is public or private",
-			Kind:   KindString,
-			Ops:    []Op{OpEq, OpNe, OpIn},
-			Column: "c.institution_type",
-			Values: institutionTypeNames,
+			Name:         "institution_type",
+			Label:        "whether the college is public or private",
+			Kind:         KindString,
+			Ops:          []Op{OpEq, OpContains, OpNe},
+			Column:       "c.institution_type",
+			CommonValues: institutionTypeNames,
 		},
 		{
-			Name:   "campus_setting",
-			Label:  "whether the campus is in a city, a suburb or a rural area",
-			Kind:   KindString,
-			Ops:    []Op{OpEq, OpNe, OpIn},
-			Column: "c.campus_setting",
-			Values: campusSettingNames,
+			Name:         "campus_setting",
+			Label:        "whether the campus is in a city, a suburb or a rural area",
+			Kind:         KindString,
+			Ops:          []Op{OpEq, OpContains, OpNe},
+			Column:       "c.campus_setting",
+			CommonValues: campusSettingNames,
 		},
 		{
 			Name:   "founded_year",

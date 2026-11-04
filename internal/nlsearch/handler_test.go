@@ -102,6 +102,15 @@ func TestHandler_SearchStatusCodes(t *testing.T) {
 			repo:        &fakeRepository{},
 			wantStatus:  http.StatusBadGateway,
 		},
+		{
+			// The question was fine; the server has spent its allowance.
+			// Sending the user off to rephrase would not help.
+			name:        "the model's allowance for the day is spent",
+			body:        `{"query":"universities"}`,
+			interpreter: &fakeInterpreter{errs: []error{ErrProviderQuotaExceeded}},
+			repo:        &fakeRepository{},
+			wantStatus:  http.StatusServiceUnavailable,
+		},
 	}
 
 	for _, tc := range cases {

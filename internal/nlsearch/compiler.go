@@ -104,6 +104,9 @@ func (b *builder) filterClause(entity *Entity, f FilterSpec) string {
 	column := field.Column
 	switch f.Op {
 	case OpIn:
+		if len(field.CommonValues) > 0 {
+			return b.looseClause(column, f)
+		}
 		return fmt.Sprintf("%s = ANY(%s::text[])", lower(column), b.bind(lowerAll(stringList(f))))
 
 	case OpEq:
@@ -113,6 +116,9 @@ func (b *builder) filterClause(entity *Entity, f FilterSpec) string {
 		case KindNumber:
 			return fmt.Sprintf("%s = %s", column, b.bind(f.Value.Num))
 		default:
+			if len(field.CommonValues) > 0 {
+				return b.looseClause(column, f)
+			}
 			return fmt.Sprintf("%s = %s", lower(column), b.bind(strings.ToLower(f.Value.Str)))
 		}
 
@@ -145,6 +151,24 @@ func (b *builder) filterClause(entity *Entity, f FilterSpec) string {
 	}
 
 	return "FALSE"
+}
+
+// looseClause matches a value as a fragment rather than exactly. It is used
+// for the fields whose values the catalogue does not control: the column
+// holds free text and the same thing has been written more than one way —
+// one row says "private-nonprofit" and another says "Private (Non-Profit)",
+// and both mean the same institution. Matching exactly would quietly find
+// neither.
+func (b *builder) looseClause(column string, f FilterSpec) string {
+	parts := make([]string, 0, len(f.Value.List)+1)
+	for _, value := range f.Value.candidates() {
+		parts = append(parts, fmt.Sprintf(
+			"%s ILIKE %s ESCAPE '\\'", column, b.bind("%"+escapeLike(value)+"%")))
+	}
+	if len(parts) == 0 {
+		return "FALSE"
+	}
+	return "(" + strings.Join(parts, " OR ") + ")"
 }
 
 // lookupClause renders a facet filter as an EXISTS over the junction table.

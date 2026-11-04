@@ -260,3 +260,40 @@ func TestCompile_FuzzyMatchScoresTheRawValue(t *testing.T) {
 		t.Errorf("expected the similarity to use the raw value, got %q", compiled.Where)
 	}
 }
+
+// The catalogue does not control what is written in its free-text columns:
+// one row says "private-nonprofit" and another says "Private (Non-Profit)".
+// An exact comparison would find neither, so these fields are matched as a
+// fragment however the model asks for them.
+func TestCompile_FreeTextColumnsAreMatchedLoosely(t *testing.T) {
+	plan := mustPlan(t, &FilterSetDTO{
+		Entity:  "universities",
+		Filters: []FilterDTO{{Field: "institution_type", Op: "=", Value: "private"}},
+	})
+
+	compiled := Compile(plan)
+
+	if !strings.Contains(compiled.Where, "u.institution_type ILIKE") {
+		t.Fatalf("expected a fragment match, got %q", compiled.Where)
+	}
+	if strings.Contains(compiled.Where, "u.institution_type =") {
+		t.Fatalf("expected no exact comparison, got %q", compiled.Where)
+	}
+	if len(compiled.Args) != 1 || compiled.Args[0] != "%private%" {
+		t.Fatalf("expected the value bound as a fragment, got %#v", compiled.Args)
+	}
+}
+
+// A column that is genuinely controlled keeps its exact comparison.
+func TestCompile_ControlledColumnsStayExact(t *testing.T) {
+	plan := mustPlan(t, &FilterSetDTO{
+		Entity:  "universities",
+		Filters: []FilterDTO{{Field: "country", Op: "=", Value: "Nepal"}},
+	})
+
+	compiled := Compile(plan)
+
+	if !strings.Contains(compiled.Where, "lower(u.country) = $1") {
+		t.Fatalf("expected the country predicate, got %q", compiled.Where)
+	}
+}
