@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
@@ -22,6 +23,7 @@ import (
 	"fmu-backend/internal/db/sqlc"
 	"fmu-backend/internal/favorites"
 	"fmu-backend/internal/mail"
+	"fmu-backend/internal/nlsearch"
 	"fmu-backend/internal/oauth"
 	"fmu-backend/internal/passwordreset"
 	"fmu-backend/internal/programs"
@@ -163,6 +165,24 @@ func main() {
 	resetSvc := passwordreset.NewService(resetRepo, userSvc, tokenSvc, mailer, cfg, nil)
 	resetHandler := passwordreset.NewHandler(resetSvc, cfg)
 
+	// Natural-language search. The model is optional: without a key the app
+	// still boots, the endpoint reports itself as unavailable, and the
+	// catalogue's own search endpoints keep serving the frontend.
+	var interpreter nlsearch.Interpreter
+	if strings.TrimSpace(cfg.Gemini.APIKey) != "" {
+		gemini, err := nlsearch.NewGeminiInterpreter(context.Background(), cfg.Gemini.APIKey, cfg.Gemini.Model)
+		if err != nil {
+			log.Fatalf("gemini init failed: %v", err)
+		}
+		interpreter = gemini
+	} else {
+		log.Println("nl-search: GEMINI_API_KEY not set, natural-language search is disabled")
+	}
+	nlRepo := nlsearch.NewRepository(pool)
+	nlSvc := nlsearch.NewService(interpreter, nlRepo)
+	nlHandler := nlsearch.NewHandler(nlSvc)
+	nlLimiter := nlsearch.NewRateLimiter(20, 5)
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -197,6 +217,7 @@ func main() {
 	programs.RegisterRoutes(r, programsHandler, authMW, adminMW)
 	scholarship.RegisterRoutes(r, scholarshipHandler, authMW, adminMW, optionalAuthMW)
 	passwordreset.RegisterRoutes(r, resetHandler)
+	nlsearch.RegisterRoutes(r, nlHandler, optionalAuthMW, nlLimiter)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,
