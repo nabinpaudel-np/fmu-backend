@@ -43,14 +43,14 @@ type Config struct {
 // natural-language search endpoint.
 //
 //	GEMINI_API_KEY  the API key (optional)
-//	GEMINI_MODEL    the model to use (default "gemini-2.5-flash")
+//	GEMINI_MODEL    the model to use (default "gemini-3.8-flash")
 //
 // The key is optional on purpose: the app must still boot without a model,
 // and the endpoint reports that it is unavailable rather than taking the
 // rest of the API down with it.
 type GeminiConfig struct {
 	APIKey string `env:"API_KEY"`
-	Model  string `env:"MODEL" envDefault:"gemini-2.5-flash"`
+	Model  string `env:"MODEL" envDefault:"gemini-3.8-flash"`
 }
 
 type CloudinaryConfig struct {

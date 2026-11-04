@@ -42,6 +42,8 @@ func (h *Handler) writeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrEmptyQuery):
 		response.Error(w, http.StatusBadRequest, "a query is required")
+	case errors.Is(err, ErrQueryTooLong):
+		response.Error(w, http.StatusBadRequest, "the query is too long")
 	case errors.As(err, &verr):
 		response.ValidationError(w, http.StatusUnprocessableEntity, []response.ErrorDetail{
 			{Field: verr.Field, Message: verr.Message},

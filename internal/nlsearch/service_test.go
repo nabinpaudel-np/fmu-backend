@@ -3,6 +3,7 @@ package nlsearch
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"fmu-backend/internal/pagination"
@@ -148,6 +149,34 @@ func TestService_RejectsAnEmptyQuestion(t *testing.T) {
 	}
 	if len(interpreter.calls) != 0 {
 		t.Fatal("expected the model not to be called for an empty question")
+	}
+}
+
+func TestService_RejectsAnOverlongQuestion(t *testing.T) {
+	interpreter := &fakeInterpreter{}
+	svc := NewService(interpreter, &fakeRepository{})
+
+	_, err := svc.Search(context.Background(), SearchRequest{Query: strings.Repeat("a", maxQueryLength+1)})
+	if !errors.Is(err, ErrQueryTooLong) {
+		t.Fatalf("expected the query to be refused, got %v", err)
+	}
+	if len(interpreter.calls) != 0 {
+		t.Fatal("expected the model not to be called for an overlong question")
+	}
+}
+
+// The cap counts characters, not bytes, so a question written in Nepali or
+// another script is not cut short by its encoding.
+func TestService_CountsTheQuestionInCharacters(t *testing.T) {
+	interpreter := &fakeInterpreter{answers: []*FilterSetDTO{{Entity: "universities"}}}
+	svc := NewService(interpreter, &fakeRepository{})
+
+	query := strings.Repeat("क", maxQueryLength)
+	if _, err := svc.Search(context.Background(), SearchRequest{Query: query}); err != nil {
+		t.Fatalf("expected a question of exactly the cap to be accepted, got %v", err)
+	}
+	if len(interpreter.calls) != 1 {
+		t.Fatalf("expected the model to be asked once, got %d calls", len(interpreter.calls))
 	}
 }
 

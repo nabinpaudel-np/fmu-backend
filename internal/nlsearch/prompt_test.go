@@ -215,7 +215,7 @@ func sampleValue(field Field, op Op) any {
 }
 
 func TestNewGeminiInterpreter_WithoutAKey(t *testing.T) {
-	_, err := NewGeminiInterpreter(context.Background(), "  ", "gemini-2.5-flash")
+	_, err := NewGeminiInterpreter(context.Background(), "  ", "gemini-3.8-flash")
 	if err != ErrProviderUnavailable {
 		t.Fatalf("expected the provider to be reported as unavailable, got %v", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"strings"
+	"unicode/utf8"
 
 	"fmu-backend/internal/pagination"
 )
@@ -18,8 +19,16 @@ import (
 // way to pull the whole catalogue.
 const maxPageSize = 50
 
+// maxQueryLength caps the question. The model is paid per token, so an
+// unbounded question is an unbounded bill, and a question that long is not a
+// question anyone is typing.
+const maxQueryLength = 500
+
 // ErrEmptyQuery means the request carried no question.
 var ErrEmptyQuery = errors.New("a query is required")
+
+// ErrQueryTooLong means the question was longer than the cap.
+var ErrQueryTooLong = errors.New("the query is too long")
 
 // Service answers natural-language questions about the catalogue.
 type Service interface {
@@ -43,6 +52,9 @@ func (s *service) Search(ctx context.Context, req SearchRequest) (*SearchRespons
 	query := strings.TrimSpace(req.Query)
 	if query == "" {
 		return nil, ErrEmptyQuery
+	}
+	if utf8.RuneCountInString(query) > maxQueryLength {
+		return nil, ErrQueryTooLong
 	}
 	if s.interpreter == nil {
 		return nil, ErrProviderUnavailable

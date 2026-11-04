@@ -69,7 +69,20 @@ func NewGeminiInterpreter(ctx context.Context, apiKey, model string) (*GeminiInt
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, ErrProviderUnavailable
 	}
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{APIKey: apiKey})
+	client, err := genai.NewClient(ctx, &genai.ClientConfig{
+		APIKey: apiKey,
+		// The Gemini API reports a busy model as a 503 and a busy quota as a
+		// 429. Both are momentary, so the request is retried a few times
+		// with a growing delay rather than being reported to the user as a
+		// failure. Without this, a busy model fails every search.
+		HTTPOptions: genai.HTTPOptions{
+			RetryOptions: &genai.HTTPRetryOptions{
+				Attempts:     genai.Ptr[int32](4),
+				InitialDelay: genai.Ptr[float64](1),
+				MaxDelay:     genai.Ptr[float64](8),
+			},
+		},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("create gemini client: %w", err)
 	}
