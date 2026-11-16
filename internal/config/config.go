@@ -43,18 +43,22 @@ type Config struct {
 // natural-language search endpoint.
 //
 //	GEMINI_API_KEY  the API key (optional)
-//	GEMINI_MODEL    the model to use (default "gemini-3.8-flash")
+//	GEMINI_MODEL    the model to use (default "gemini-3.5-flash-lite")
 //
 // The key is optional on purpose: the app must still boot without a model,
 // and the endpoint reports that it is unavailable rather than taking the
 // rest of the API down with it.
 //
-// The free tier of the Gemini API allows only a handful of requests a day
-// per model, and the endpoint spends two of them on every search. Enabling
-// billing on the project is what makes the feature usable.
+// The free tier's daily allowance is counted per model, and the models are
+// not treated alike: gemini-3.5-flash-lite and gemini-3.1-flash-lite allow
+// 500 requests a day, while gemini-3.8-flash, gemini-3.6-flash,
+// gemini-3-flash, gemini-2.5-flash and gemini-2.5-flash-lite allow only 20.
+// "flash-lite" is therefore not a safe label to reason with — gemini-2.5-
+// flash-lite is on the short allowance. The default is the model with the
+// generous one.
 type GeminiConfig struct {
 	APIKey string `env:"API_KEY"`
-	Model  string `env:"MODEL" envDefault:"gemini-3.8-flash"`
+	Model  string `env:"MODEL" envDefault:"gemini-3.5-flash-lite"`
 }
 
 type CloudinaryConfig struct {
