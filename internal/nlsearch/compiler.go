@@ -6,44 +6,33 @@ import (
 	"strings"
 )
 
-// The compiler is the only place where a model's answer becomes SQL. It
-// receives a Plan that has already been checked against the vocabulary, so
-// every identifier it writes comes from vocabulary.go and every value becomes
-// a bound parameter. Nothing the model said is ever concatenated into the
-// query text.
-//
-// The model cannot widen its own access: the publication filter is added here,
-// after the model is finished, and the model's filters are AND-ed on top of
-// it.
+// The compiler turns a validated plan into SQL. Identifiers come from
+// vocabulary.go and values are always bound as parameters, so nothing the
+// model said ends up in the query text.
 
 const (
 	// trigramThreshold is the similarity floor for a fuzzy text match. It
-	// sits below Postgres' default of 0.3 so near-misses still match, which
-	// is what makes "kathamndu" find "Kathmandu".
+	// sits below Postgres' default of 0.3 so "kathamndu" still matches
+	// "Kathmandu".
 	trigramThreshold = 0.2
 )
 
-// Compiled is a plan rendered as SQL fragments. The caller assembles them
-// into a statement; it cannot add a predicate of its own.
+// Compiled is a plan rendered as SQL fragments.
 type Compiled struct {
-	// Where is a set of AND-ed predicates, each prefixed with " AND ".
-	Where string
-	// Args holds the bound parameters in placeholder order.
-	Args []any
-	// OrderBy is a fully-formed ORDER BY expression.
+	Where   string
+	Args    []any
 	OrderBy string
 }
 
 // builder accumulates bound arguments and hands out placeholder numbers.
 type builder struct {
 	args []any
-	// relevance records the first fuzzy text filter on the entity being
-	// returned, so results can be ordered by how well they match.
+	// relevance is the first fuzzy text filter on the returned entity, used
+	// to order results by how well they match.
 	relevance *relevance
 }
 
 // relevance is the column and parameter a fuzzy match is scored against.
-// The two travel together so they cannot be mixed up.
 type relevance struct {
 	column string
 	param  string
@@ -56,13 +45,15 @@ func (b *builder) bind(v any) string {
 }
 
 // Compile renders a validated plan into a WHERE clause, its arguments and an
-// ordering. The plan is expected to have come from Validate; a plan that has
-// not is a programming error, not a user error.
+// ordering.
 func Compile(plan *Plan) *Compiled {
 	b := &builder{}
 	entity := plan.Entity
 
-	clauses := []string{statusClause(entity)}
+	clauses := []string{}
+	if status := statusClause(entity); status != "" {
+		clauses = append(clauses, status)
+	}
 
 	for _, f := range plan.Filters {
 		clauses = append(clauses, b.filterClause(entity, f))
@@ -70,28 +61,43 @@ func Compile(plan *Plan) *Compiled {
 
 	for _, rel := range plan.Related {
 		// A fuzzy filter inside a related clause ranks rows in that
-		// subquery, not the rows being returned, so the outer ranking is
-		// left as it was.
+		// subquery, not the rows being returned.
 		saved := b.relevance
 		clauses = append(clauses, b.relatedClause(entity, rel))
 		b.relevance = saved
 	}
 
+	where := ""
+	if len(clauses) > 0 {
+		where = " AND " + strings.Join(clauses, " AND ")
+	}
+
 	return &Compiled{
-		Where:   " AND " + strings.Join(clauses, " AND "),
+		Where:   where,
 		Args:    b.args,
 		OrderBy: orderBy(plan, b),
 	}
 }
 
-// statusClause restricts a result set to published rows. It is added by the
-// server, so a model that asks for a draft never sees one.
+// statusClause restricts a result set to published rows. It is added here,
 func statusClause(entity *Entity) string {
+	if entity.StatusColumn == "" {
+		return ""
+	}
 	return fmt.Sprintf("%s.%s = 'published'", entity.Alias, entity.StatusColumn)
 }
 
-// filterClause renders one validated filter.
+// filterClause renders one validated filter. A group of alternatives becomes
+// a bracketed OR of its members.
 func (b *builder) filterClause(entity *Entity, f FilterSpec) string {
+	if len(f.Any) > 0 {
+		parts := make([]string, 0, len(f.Any))
+		for _, alt := range f.Any {
+			parts = append(parts, b.filterClause(entity, alt))
+		}
+		return "(" + strings.Join(parts, " OR ") + ")"
+	}
+
 	field, ok := entity.Field(f.Field)
 	if !ok {
 		// Unreachable: Validate rejected unknown fields.
@@ -153,12 +159,7 @@ func (b *builder) filterClause(entity *Entity, f FilterSpec) string {
 	return "FALSE"
 }
 
-// looseClause matches a value as a fragment rather than exactly. It is used
-// for the fields whose values the catalogue does not control: the column
-// holds free text and the same thing has been written more than one way —
-// one row says "private-nonprofit" and another says "Private (Non-Profit)",
-// and both mean the same institution. Matching exactly would quietly find
-// neither.
+// looseClause matches a value as a fragment rather than exactly.
 func (b *builder) looseClause(column string, f FilterSpec) string {
 	parts := make([]string, 0, len(f.Value.List)+1)
 	for _, value := range f.Value.candidates() {
@@ -172,12 +173,18 @@ func (b *builder) looseClause(column string, f FilterSpec) string {
 }
 
 // lookupClause renders a facet filter as an EXISTS over the junction table.
-// The reference row's name is matched, so the value the model picked is
-// checked against the seeded list at query time as well as at validation
-// time.
 func (b *builder) lookupClause(entity *Entity, field Field, f FilterSpec) string {
 	lookup := field.Lookup
 	values := lowerAll(stringList(f))
+
+	if f.Op == OpNe {
+		return fmt.Sprintf(
+			"NOT EXISTS (SELECT 1 FROM %s jt JOIN %s lk ON lk.id = jt.%s WHERE jt.%s = %s.id AND lower(lk.name) = ANY(%s::text[]))",
+			lookup.JoinTable, lookup.LookupTable, lookup.FKColumn, lookup.ParentColumn,
+			entity.Alias, b.bind(values),
+		)
+	}
+
 	return fmt.Sprintf(
 		"EXISTS (SELECT 1 FROM %s jt JOIN %s lk ON lk.id = jt.%s WHERE jt.%s = %s.id AND lower(lk.name) = ANY(%s::text[]))",
 		lookup.JoinTable, lookup.LookupTable, lookup.FKColumn, lookup.ParentColumn,
@@ -185,28 +192,99 @@ func (b *builder) lookupClause(entity *Entity, field Field, f FilterSpec) string
 	)
 }
 
-// relatedClause renders a filter on a related entity as an EXISTS. The
-// related rows are scoped to published as well, so a draft scholarship
-// cannot make a university look like it offers one.
+// relatedClause renders a filter on a related entity as an EXISTS.
 func (b *builder) relatedClause(entity *Entity, rel RelatedSpec) string {
 	relation := rel.Relation
-	inner := []string{
-		fmt.Sprintf("%s.%s = %s.id", relation.Entity.Alias, relation.FK, entity.Alias),
-		statusClause(relation.Entity),
+
+	var inner []string
+	if relation.Through != nil {
+		inner = append(inner, b.throughClause(entity, relation, rel.Filters)...)
+	} else {
+		inner = append(inner,
+			fmt.Sprintf("%s.%s = %s.id", relation.Entity.Alias, relation.FK, entity.Alias),
+			statusClause(relation.Entity),
+		)
+		for _, f := range rel.Filters {
+			inner = append(inner, b.filterClause(relation.Entity, f))
+		}
 	}
-	for _, f := range rel.Filters {
-		inner = append(inner, b.filterClause(relation.Entity, f))
-	}
+
 	return fmt.Sprintf(
 		"EXISTS (SELECT 1 FROM %s %s WHERE %s)",
 		relation.Entity.Table, relation.Entity.Alias, strings.Join(inner, " AND "),
 	)
 }
 
-// orderBy renders the requested ordering. A question that names something in
-// passing ("universities like Kathmandu University") is answered best by the
-// closest match first, so a fuzzy filter outranks the default order unless
-// the model asked for a specific one.
+// throughClause renders a relation that runs through a shared middle table.
+func (b *builder) throughClause(entity *Entity, relation *Relation, filters []FilterSpec) []string {
+	through := relation.Through
+	related := relation.Entity
+
+	// The middle table gets its own alias so its columns do not collide
+	// with either side's.
+	const middle = "mid"
+
+	clauses := []string{}
+
+	clauses = append(clauses, fmt.Sprintf(
+		"EXISTS (SELECT 1 FROM %s %s WHERE %s)",
+		through.Table, middle, b.throughSides(entity, related, relation, middle),
+	))
+
+	// A draft row on the other side must not satisfy the constraint.
+	if status := statusClause(related); status != "" {
+		clauses = append(clauses, status)
+	}
+
+	for _, f := range filters {
+		clauses = append(clauses, b.filterClause(related, f))
+	}
+
+	return clauses
+}
+
+// throughSides renders the two halves of a shared-middle relation.
+func (b *builder) throughSides(entity, related *Entity, relation *Relation, middle string) string {
+	through := relation.Through
+
+	var sides []string
+
+	switch {
+	case through.ParentJunction != "":
+		sides = append(sides, fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM %s pj WHERE pj.%s = %s.id AND pj.%s = %s.id)",
+			through.ParentJunction,
+			through.ParentColumn, entity.Alias,
+			through.MiddleColumn, middle,
+		))
+	default:
+		// The parent reaches the middle table directly, through its own
+		// column: a programme points at its degree level with degree_id.
+		sides = append(sides, fmt.Sprintf(
+			"%s.%s = %s.%s",
+			entity.Alias, through.ParentColumn, middle, through.MiddleColumn,
+		))
+	}
+
+	switch {
+	case through.EntityJunction != "":
+		sides = append(sides, fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM %s ej WHERE ej.%s = %s.id AND ej.%s = %s.id)",
+			through.EntityJunction,
+			through.EntityColumn, related.Alias,
+			through.MiddleEntityColumn, middle,
+		))
+	default:
+		sides = append(sides, fmt.Sprintf(
+			"%s.%s = %s.%s",
+			related.Alias, through.EntityColumn, middle, through.MiddleEntityColumn,
+		))
+	}
+
+	return strings.Join(sides, " AND ")
+}
+
+// orderBy renders the requested ordering.
 func orderBy(plan *Plan, b *builder) string {
 	if plan.Sort != nil {
 		if field, ok := plan.Entity.Field(plan.Sort.Field); ok && field.Column != "" {
@@ -219,9 +297,8 @@ func orderBy(plan *Plan, b *builder) string {
 	return plan.Entity.DefaultOrder
 }
 
-// escapeLike neutralises the wildcards in a user-supplied value so it is
-// matched literally. Without this, a value of "%" matches every row and a
-// value of "_" matches any single character.
+// escapeLike neutralises the wildcards in a value so it is matched
+// literally. Without this, "%" matches every row.
 func escapeLike(s string) string {
 	return likeEscaper.Replace(s)
 }
@@ -234,9 +311,7 @@ var likeEscaper = strings.NewReplacer(
 	`_`, `\_`,
 )
 
-// lower wraps a column so a comparison ignores case. The model writes values
-// the way a person writes them ("nepal"), the database stores them the way
-// the seed did ("Nepal").
+// lower wraps a column so a comparison ignores case.
 func lower(column string) string {
 	return "lower(" + column + ")"
 }

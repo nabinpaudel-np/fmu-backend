@@ -11,11 +11,6 @@ import (
 	"fmu-backend/internal/response"
 )
 
-// Every request to this endpoint costs a model call, so the number of calls a
-// single client can make is capped. The limit is per signed-in user where
-// there is one and per address otherwise, so one user cannot spend another
-// user's allowance and a shared address still gets a usable budget.
-
 // RateLimiter is a token bucket per caller.
 type RateLimiter struct {
 	mu      sync.Mutex
@@ -112,10 +107,6 @@ func callerKey(r *http.Request) string {
 }
 
 // clientIP returns the caller's address. chi's RealIP middleware has already
-// rewritten RemoteAddr from the forwarding headers by the time this runs, so
-// behind a proxy this is the forwarded address. The limit is a ceiling on
-// model spend, not a security boundary, which is why a spoofed header only
-// costs money rather than access.
 func clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {

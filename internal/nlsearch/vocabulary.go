@@ -2,14 +2,10 @@ package nlsearch
 
 import "slices"
 
-// The vocabulary is the contract between the model and the database.
-//
-// Every attribute a user can ask about appears exactly once here, with a
-// human-written label that the model reads. The label is what makes
-// "located in Kathmandu" map to `city` instead of `country`; the column is
-// what the compiler binds against. Both the prompt and the allowlist are
-// generated from this file, so a field can never be visible to the model but
-// invisible to the validator (or vice versa).
+// The vocabulary is the contract between the model and the database. Every
+// attribute a user can ask about appears exactly once here, with a label the
+// model reads. The prompt and the validator are both generated from this
+// file, so they cannot drift apart.
 
 // Kind is the value shape a filter field accepts. It decides which operators
 // are legal and how the compiler binds the value.
@@ -37,49 +33,37 @@ const (
 	OpMatches  Op = "matches"
 )
 
-// Lookup redirects a many-valued facet to a reference table. The field's
-// value is the reference row's name, and the compiler emits an EXISTS over
-// the junction table.
+// Lookup redirects a many-valued facet to a reference table.
 type Lookup struct {
-	// JoinTable links the owner to the reference rows.
-	JoinTable string
-	// LookupTable holds the reference rows; its name column is the value.
-	LookupTable string
-	// FKColumn is the junction column pointing at the reference row.
-	FKColumn string
-	// ParentColumn is the junction column pointing back at the owning
-	// entity, for example "university_id" in university_degree_levels.
+	JoinTable    string
+	LookupTable  string
+	FKColumn     string
 	ParentColumn string
 }
 
+// Code names the abbreviation a column holds. A question names a country in
+// words, so the model's value is translated into the code before it is bound.
+type Code string
+
+const (
+	// CodeCountry is an ISO 3166-1 alpha-2 country code.
+	CodeCountry Code = "country"
+	// CodeState is a two-letter US state code.
+	CodeState Code = "state"
+)
+
 // Field is one searchable attribute.
 type Field struct {
-	// Name is what the model emits.
-	Name string
-	// Label is the description the model reads. Write it the way a person
-	// would describe the attribute to another person.
-	Label string
-	Kind  Kind
-	// Ops lists the legal operators for this field.
-	Ops []Op
-	// Column is the SQL expression the value is compared against.
-	Column string
-	// Lookup, when set, turns the field into an EXISTS over a reference
-	// table instead of a plain column comparison.
-	Lookup *Lookup
-	// Values is a closed vocabulary. When set, the model may only pick from
-	// it and the server rejects anything else. Only use it where the column
-	// genuinely holds a controlled set of values.
-	Values []string
-	// CommonValues are the values a field usually holds. They are shown to
-	// the model as guidance but not enforced, because the column they sit in
-	// is free text and what is stored there has not always been written the
-	// same way: one row says "private-nonprofit" and another says "Private".
-	// A field like that is matched loosely, so an exact list would quietly
-	// match nothing.
+	Name         string
+	Label        string
+	Kind         Kind
+	Ops          []Op
+	Column       string
+	Lookup       *Lookup
+	Values       []string
 	CommonValues []string
-	// Sortable marks a field the results may be ordered by.
-	Sortable bool
+	Code         Code
+	Sortable     bool
 }
 
 // Allows reports whether op is legal for this field.
@@ -89,35 +73,35 @@ func (f Field) Allows(op Op) bool {
 
 // Entity is a searchable table.
 type Entity struct {
-	// Name is the model-facing entity name.
-	Name string
-	// Label describes the entity to the model.
-	Label string
-	// Description says what this catalogue holds. It is what the model reads
-	// when it decides which catalogue a question is about.
-	Description string
-	// Table and Alias are used by the compiler to build SQL.
-	Table string
-	Alias string
-	// StatusColumn holds the publication state. The compiler always restricts
-	// results to published rows, so the model can never surface a draft.
+	Name         string
+	Label        string
+	Table        string
+	Alias        string
 	StatusColumn string
-	// DefaultOrder is the ORDER BY used when the model asks for no order.
 	DefaultOrder string
-	// Fields are the attributes searchable on this entity.
-	Fields []Field
-	// Related maps a related-entity name (e.g. "scholarships") to the
-	// relation that reaches it.
-	Related map[string]*Relation
+	Fields       []Field
+	Related      map[string]*Relation
 }
 
 // Relation lets a filter on this entity reach into another one: "universities
 // that offer a scholarship of at least 500000".
 type Relation struct {
-	// Entity is the related entity's own field set.
-	Entity *Entity
-	// FK is the column on the related table pointing back at the parent.
-	FK string
+	Entity  *Entity
+	FK      string
+	Through *Through
+}
+
+// Through describes a link that runs through a shared middle table.
+type Through struct {
+	Table string
+
+	ParentJunction string
+	ParentColumn   string
+	MiddleColumn   string
+
+	EntityJunction     string
+	EntityColumn       string
+	MiddleEntityColumn string
 }
 
 // Field looks up a field by name.
@@ -186,10 +170,7 @@ var athleticNames = []string{
 
 var campusSettingNames = []string{"urban", "suburban", "rural"}
 
-// These three sit in free-text columns. The values below are the ones the
-// catalogue tends to hold; they are guidance for the model rather than a
-// closed list, because a row imported by hand may hold a different spelling
-// of the same thing. The compiler matches them loosely.
+// These three sit in free-text columns, so the values are only guidance.
 var institutionTypeNames = []string{
 	"public",
 	"private",
@@ -224,12 +205,9 @@ var demographicNames = []string{
 }
 
 // scholarshipEntity is the related entity reachable from universities and
-// colleges. It deliberately omits provider contact details and internal
-// notes: nothing outside this file may be reached from a model response.
 var scholarshipEntity = &Entity{
 	Name:         "scholarships",
 	Label:        "a scholarship programme",
-	Description:  "scholarship programmes: how much they award, who is eligible, when to apply, and the organisation offering them",
 	Table:        "scholarships",
 	Alias:        "s",
 	StatusColumn: "status",
@@ -262,6 +240,7 @@ var scholarshipEntity = &Entity{
 			Kind:   KindString,
 			Ops:    []Op{OpEq, OpNe, OpIn},
 			Column: "s.country",
+			Code:   CodeCountry,
 		},
 		{
 			Name:   "state",
@@ -269,6 +248,7 @@ var scholarshipEntity = &Entity{
 			Kind:   KindString,
 			Ops:    []Op{OpEq, OpNe, OpIn},
 			Column: "s.state",
+			Code:   CodeState,
 		},
 		{
 			Name:   "city",
@@ -366,7 +346,7 @@ var scholarshipEntity = &Entity{
 			Name:   "education_levels",
 			Label:  "the education levels the scholarship is open to",
 			Kind:   KindString,
-			Ops:    []Op{OpEq, OpIn},
+			Ops:    []Op{OpEq, OpNe, OpIn},
 			Column: "",
 			Lookup: &Lookup{
 				JoinTable:    "scholarship_education_levels",
@@ -380,7 +360,7 @@ var scholarshipEntity = &Entity{
 			Name:   "majors",
 			Label:  "the fields of study the scholarship is open to",
 			Kind:   KindString,
-			Ops:    []Op{OpEq, OpIn},
+			Ops:    []Op{OpEq, OpNe, OpIn},
 			Column: "",
 			Lookup: &Lookup{
 				JoinTable:    "scholarship_majors",
@@ -394,7 +374,7 @@ var scholarshipEntity = &Entity{
 			Name:   "demographics",
 			Label:  "the groups of students the scholarship is open to",
 			Kind:   KindString,
-			Ops:    []Op{OpEq, OpIn},
+			Ops:    []Op{OpEq, OpNe, OpIn},
 			Column: "",
 			Lookup: &Lookup{
 				JoinTable:    "scholarship_demographics",
@@ -407,10 +387,67 @@ var scholarshipEntity = &Entity{
 	},
 }
 
+// programEntity is the catalogue of study programmes.
+var programEntity = &Entity{
+	Name:  "programs",
+	Label: "a study programme",
+	// "degree" and "bachelor"/"master" are deliberately not keywords here.
+	// They are qualifiers far more often than they name a catalogue — a
+	// question about "bachelor's degree colleges" is about colleges — and
+	// the model can still reach a programme through the related catalogues.
+	Table:        "programs",
+	Alias:        "p",
+	StatusColumn: "",
+	DefaultOrder: "p.title ASC",
+	Fields: []Field{
+		{
+			Name:   "title",
+			Label:  "the name of the programme, for example BCA or MBA",
+			Kind:   KindText,
+			Ops:    []Op{OpMatches, OpContains},
+			Column: "p.title",
+		},
+		{
+			Name:   "description",
+			Label:  "what the programme covers",
+			Kind:   KindText,
+			Ops:    []Op{OpContains, OpMatches},
+			Column: "p.description",
+		},
+		{
+			Name:   "excerpt",
+			Label:  "the short summary of the programme",
+			Kind:   KindText,
+			Ops:    []Op{OpContains, OpMatches},
+			Column: "p.excerpt",
+		},
+		{
+			Name:   "career_options",
+			Label:  "the careers the programme leads to, for example software developer or data analyst",
+			Kind:   KindText,
+			Ops:    []Op{OpContains, OpMatches},
+			Column: "p.career_options",
+		},
+		{
+			Name:   "degree_levels",
+			Label:  "the degree level the programme belongs to, for example Bachelor's or Master's",
+			Kind:   KindString,
+			Ops:    []Op{OpEq, OpNe, OpIn},
+			Column: "",
+			Lookup: &Lookup{
+				JoinTable:    "programs",
+				LookupTable:  "degree_levels",
+				FKColumn:     "degree_id",
+				ParentColumn: "id",
+			},
+			Values: degreeLevelNames,
+		},
+	},
+}
+
 var universityEntity = &Entity{
 	Name:         "universities",
 	Label:        "a university",
-	Description:  "universities and degree-awarding institutions: where they are, what they charge, how selective they are, the degrees and majors they teach, and the scholarships they offer",
 	Table:        "universities",
 	Alias:        "u",
 	StatusColumn: "status",
@@ -429,6 +466,7 @@ var universityEntity = &Entity{
 			Kind:   KindString,
 			Ops:    []Op{OpEq, OpNe, OpIn, OpContains},
 			Column: "u.country",
+			Code:   CodeCountry,
 		},
 		{
 			Name:   "state",
@@ -436,6 +474,7 @@ var universityEntity = &Entity{
 			Kind:   KindString,
 			Ops:    []Op{OpEq, OpNe, OpIn, OpContains},
 			Column: "u.state",
+			Code:   CodeState,
 		},
 		{
 			Name:   "city",
@@ -612,7 +651,7 @@ var universityEntity = &Entity{
 			Name:   "degree_levels",
 			Label:  "the degree levels the university awards, for example Bachelor's or Master's",
 			Kind:   KindString,
-			Ops:    []Op{OpEq, OpIn},
+			Ops:    []Op{OpEq, OpNe, OpIn},
 			Column: "",
 			Lookup: &Lookup{
 				JoinTable:    "university_degree_levels",
@@ -626,7 +665,7 @@ var universityEntity = &Entity{
 			Name:   "majors",
 			Label:  "the fields of study the university offers, for example Engineering or Business",
 			Kind:   KindString,
-			Ops:    []Op{OpEq, OpIn},
+			Ops:    []Op{OpEq, OpNe, OpIn},
 			Column: "",
 			Lookup: &Lookup{
 				JoinTable:    "university_majors",
@@ -640,7 +679,7 @@ var universityEntity = &Entity{
 			Name:   "study_formats",
 			Label:  "how the university delivers its courses, for example fully online or fully in person",
 			Kind:   KindString,
-			Ops:    []Op{OpEq, OpIn},
+			Ops:    []Op{OpEq, OpNe, OpIn},
 			Column: "",
 			Lookup: &Lookup{
 				JoinTable:    "university_study_formats",
@@ -654,7 +693,7 @@ var universityEntity = &Entity{
 			Name:   "special_affiliations",
 			Label:  "the special affiliation the university belongs to, for example HBCU or a women's college",
 			Kind:   KindString,
-			Ops:    []Op{OpEq, OpIn},
+			Ops:    []Op{OpEq, OpNe, OpIn},
 			Column: "",
 			Lookup: &Lookup{
 				JoinTable:    "university_special_affiliations",
@@ -668,7 +707,7 @@ var universityEntity = &Entity{
 			Name:   "athletics",
 			Label:  "the athletic programmes the university competes in",
 			Kind:   KindString,
-			Ops:    []Op{OpEq, OpIn},
+			Ops:    []Op{OpEq, OpNe, OpIn},
 			Column: "",
 			Lookup: &Lookup{
 				JoinTable:    "university_athletics",
@@ -684,7 +723,6 @@ var universityEntity = &Entity{
 var collegeEntity = &Entity{
 	Name:         "colleges",
 	Label:        "a college",
-	Description:  "colleges: where they are, the degrees and majors they teach, and the scholarships they offer",
 	Table:        "colleges",
 	Alias:        "c",
 	StatusColumn: "status",
@@ -703,6 +741,7 @@ var collegeEntity = &Entity{
 			Kind:   KindString,
 			Ops:    []Op{OpEq, OpNe, OpIn, OpContains},
 			Column: "c.country",
+			Code:   CodeCountry,
 		},
 		{
 			Name:   "state",
@@ -710,6 +749,7 @@ var collegeEntity = &Entity{
 			Kind:   KindString,
 			Ops:    []Op{OpEq, OpNe, OpIn, OpContains},
 			Column: "c.state",
+			Code:   CodeState,
 		},
 		{
 			Name:   "city",
@@ -780,7 +820,7 @@ var collegeEntity = &Entity{
 			Name:   "degree_levels",
 			Label:  "the degree levels the college awards, for example Bachelor's or Master's",
 			Kind:   KindString,
-			Ops:    []Op{OpEq, OpIn},
+			Ops:    []Op{OpEq, OpNe, OpIn},
 			Column: "",
 			Lookup: &Lookup{
 				JoinTable:    "college_degree_levels",
@@ -794,7 +834,7 @@ var collegeEntity = &Entity{
 			Name:   "majors",
 			Label:  "the fields of study the college offers, for example Engineering or Business",
 			Kind:   KindString,
-			Ops:    []Op{OpEq, OpIn},
+			Ops:    []Op{OpEq, OpNe, OpIn},
 			Column: "",
 			Lookup: &Lookup{
 				JoinTable:    "college_majors",
@@ -808,7 +848,7 @@ var collegeEntity = &Entity{
 			Name:   "study_formats",
 			Label:  "how the college delivers its courses, for example fully online or fully in person",
 			Kind:   KindString,
-			Ops:    []Op{OpEq, OpIn},
+			Ops:    []Op{OpEq, OpNe, OpIn},
 			Column: "",
 			Lookup: &Lookup{
 				JoinTable:    "college_study_formats",
@@ -835,16 +875,67 @@ var sortableFields = map[string][]string{
 		"title", "award_min", "award_max", "number_of_awards", "min_gpa",
 		"is_popular", "is_featured",
 	},
+	"programs": {
+		"title",
+	},
 }
 
 func init() {
 	universityEntity.Related = map[string]*Relation{
 		"scholarships": {Entity: scholarshipEntity, FK: "university_id"},
+		"colleges":     {Entity: collegeEntity, FK: "university_id"},
+		"programs": {Entity: programEntity, Through: &Through{
+			// A university awards degree levels through
+			// university_degree_levels, and a programme belongs to a degree
+			// level through its own degree_id column. The two meet on the
+			// degree_levels row.
+			Table:              "degree_levels",
+			ParentJunction:     "university_degree_levels",
+			ParentColumn:       "university_id",
+			MiddleColumn:       "degree_level_id",
+			EntityJunction:     "",
+			EntityColumn:       "degree_id",
+			MiddleEntityColumn: "id",
+		}},
 	}
 	collegeEntity.Related = map[string]*Relation{
 		"scholarships": {Entity: scholarshipEntity, FK: "college_id"},
+		"universities": {Entity: universityEntity, FK: "university_id"},
+		"programs": {Entity: programEntity, Through: &Through{
+			Table:              "degree_levels",
+			ParentJunction:     "college_degree_levels",
+			ParentColumn:       "college_id",
+			MiddleColumn:       "degree_level_id",
+			EntityJunction:     "",
+			EntityColumn:       "degree_id",
+			MiddleEntityColumn: "id",
+		}},
 	}
-	for _, entity := range []*Entity{universityEntity, collegeEntity, scholarshipEntity} {
+	scholarshipEntity.Related = map[string]*Relation{
+		"universities": {Entity: universityEntity, FK: "university_id"},
+		"colleges":     {Entity: collegeEntity, FK: "college_id"},
+	}
+	programEntity.Related = map[string]*Relation{
+		"universities": {Entity: universityEntity, Through: &Through{
+			Table:              "degree_levels",
+			ParentJunction:     "",
+			ParentColumn:       "degree_id",
+			MiddleColumn:       "id",
+			EntityJunction:     "university_degree_levels",
+			EntityColumn:       "university_id",
+			MiddleEntityColumn: "degree_level_id",
+		}},
+		"colleges": {Entity: collegeEntity, Through: &Through{
+			Table:              "degree_levels",
+			ParentJunction:     "",
+			ParentColumn:       "degree_id",
+			MiddleColumn:       "id",
+			EntityJunction:     "college_degree_levels",
+			EntityColumn:       "college_id",
+			MiddleEntityColumn: "degree_level_id",
+		}},
+	}
+	for _, entity := range []*Entity{universityEntity, collegeEntity, scholarshipEntity, programEntity} {
 		for _, name := range sortableFields[entity.Name] {
 			for i := range entity.Fields {
 				if entity.Fields[i].Name == name {
@@ -861,6 +952,7 @@ var entities = []*Entity{
 	universityEntity,
 	collegeEntity,
 	scholarshipEntity,
+	programEntity,
 }
 
 // entityByName resolves a model-supplied entity name.

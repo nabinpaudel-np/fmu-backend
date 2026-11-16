@@ -11,17 +11,13 @@ import (
 )
 
 // The service is the whole flow: a question goes in, an interpretation comes
-// back, and the plan is executed against the catalogue. It is the only place
-// that knows the order of those steps.
+// back, and the plan is executed against the catalogue.
 
-// maxPageSize caps how many rows one request may ask for. The model call is
-// the expensive part, not the query, but an unbounded page size is still a
-// way to pull the whole catalogue.
+// maxPageSize caps how many rows one request may ask for.
 const maxPageSize = 50
 
 // maxQueryLength caps the question. The model is paid per token, so an
-// unbounded question is an unbounded bill, and a question that long is not a
-// question anyone is typing.
+// unbounded question is an unbounded bill.
 const maxQueryLength = 500
 
 // ErrEmptyQuery means the request carried no question.
@@ -38,13 +34,12 @@ type Service interface {
 type service struct {
 	interpreter Interpreter
 	repo        Repository
+	cache       *planCache
 }
 
-// NewService builds the service. A nil interpreter is allowed: the endpoint
-// then reports that the feature is not configured rather than failing at
-// boot.
+// NewService builds the service. A nil interpreter is allowed.
 func NewService(interpreter Interpreter, repo Repository) Service {
-	return &service{interpreter: interpreter, repo: repo}
+	return &service{interpreter: interpreter, repo: repo, cache: newPlanCache()}
 }
 
 // Search interprets the question and runs the resulting plan.
@@ -60,42 +55,48 @@ func (s *service) Search(ctx context.Context, req SearchRequest) (*SearchRespons
 		return nil, ErrProviderUnavailable
 	}
 
-	// The catalogue is decided first, so the model is asked about fields
-	// that belong to it and cannot name one that does not.
-	classification, err := s.interpreter.Classify(ctx, query)
+	// The model reads the question and decides which catalogue it is about,
+	// so there is nothing decided here. The server checks afterwards that
+	// what the model named exists.
+	cacheKey := normaliseQuery(query)
+	if cached, ok := s.cache.Get(cacheKey); ok {
+		log.Printf("nl-search: %q -> %s (cached)", query, cached.Primary.Entity.Name)
+		return s.run(ctx, req, query, cached, cached.Primary.Assumptions)
+	}
+
+	dto, err := s.interpreter.Interpret(ctx, InterpretRequest{Question: query})
 	if err != nil {
 		return nil, err
 	}
 
-	dto, err := s.interpreter.Interpret(ctx, InterpretRequest{
-		Question: query,
-		Entity:   classification.Entity,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	plan, verr := Validate(dto)
+	plans, verr := Validate(dto)
 	if verr != nil {
 		// The model is given the exact complaint once. A second failure is
 		// reported to the caller rather than retried again.
 		dto, err = s.interpreter.Interpret(ctx, InterpretRequest{
 			Question:   query,
-			Entity:     classification.Entity,
 			Correction: verr.Error(),
 		})
 		if err != nil {
 			return nil, err
 		}
-		plan, verr = Validate(dto)
+		plans, verr = Validate(dto)
 		if verr != nil {
 			return nil, verr
 		}
 	}
 
-	log.Printf("nl-search: %q -> %s (%d filters, %d related groups)",
-		query, plan.Entity.Name, len(plan.Filters), len(plan.Related))
+	s.cache.Put(cacheKey, plans)
 
+	log.Printf("nl-search: %q -> %s (%d filters, %d related groups, %d catalogues)",
+		query, plans.Primary.Entity.Name, len(plans.Primary.Filters),
+		len(plans.Primary.Related), len(plans.All()))
+
+	return s.run(ctx, req, query, plans, plans.Primary.Assumptions)
+}
+
+// run executes the plans against the catalogue and shapes the answer.
+func (s *service) run(ctx context.Context, req SearchRequest, query string, plans *Plans, assumptions string) (*SearchResponse, error) {
 	page := pagination.Query{Page: req.Page, PageSize: req.PageSize}
 	if page.Page < 1 {
 		page.Page = pagination.DefaultPage
@@ -107,31 +108,26 @@ func (s *service) Search(ctx context.Context, req SearchRequest) (*SearchRespons
 		page.PageSize = maxPageSize
 	}
 
-	items, total, err := s.repo.Search(ctx, plan, page)
-	if err != nil {
-		return nil, err
+	items := make([]ResultItem, 0, page.PageSize)
+	var total int64
+
+	for _, plan := range plans.All() {
+		rows, count, err := s.repo.Search(ctx, plan, page)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, rows...)
+		total += count
 	}
 
 	return &SearchResponse{
 		Query: query,
 		Interpretation: Interpretation{
-			Entity:      plan.Entity.Name,
-			Assumptions: joinNotes(classification.Assumptions, plan.Assumptions),
-			Unmapped:    plan.Unmapped,
+			Entity:      strings.Join(plans.Entities(), ", "),
+			Assumptions: assumptions,
+			Unmapped:    plans.Primary.Unmapped,
 		},
 		Items: items,
 		Meta:  page.BuildMeta(total),
 	}, nil
-}
-
-// joinNotes merges the two notes the model may have left, one from deciding
-// the catalogue and one from reading the question.
-func joinNotes(notes ...string) string {
-	kept := make([]string, 0, len(notes))
-	for _, note := range notes {
-		if note = strings.TrimSpace(note); note != "" {
-			kept = append(kept, note)
-		}
-	}
-	return strings.Join(kept, "; ")
 }

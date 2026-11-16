@@ -13,8 +13,7 @@ import (
 
 // The repository runs a compiled plan. It owns the row shape — which columns
 // are read and how they are scanned — but not the filtering: the predicates
-// arrive already built by the compiler, so there is no way for a filter to
-// be added here without going through the vocabulary.
+// arrive already built by the compiler.
 
 // Repository reads the catalogue for a validated plan.
 type Repository interface {
@@ -131,6 +130,22 @@ func selectColumns(entity *Entity) []string {
 			a + "is_popular",
 			a + "is_featured",
 		}
+	case "programs":
+		// A programme has no slug and no publication state, so the row is
+		// identified by its title alone. The frontend links to a programme by
+		// title, so that is what the slug carries here.
+		return []string{
+			a + "id",
+			a + "title",
+			a + "title AS slug",
+			"'' AS logo",
+			"'' AS cover_image",
+			"COALESCE(" + a + "description, '') AS description",
+			"COALESCE(" + a + "excerpt, '') AS excerpt",
+			"COALESCE(" + a + "career_options, '') AS career_options",
+			"false AS is_popular",
+			"false AS is_featured",
+		}
 	}
 	return []string{a + "id"}
 }
@@ -171,6 +186,13 @@ func scanItems(entity *Entity, rows pgx.Rows) ([]ResultItem, error) {
 				&item.Country, &item.State, &item.City,
 				&item.MinGpa, &item.NumberOfAwards,
 				&item.ApplicationDeadline,
+				&item.IsPopular, &item.IsFeatured,
+			)
+		case "programs":
+			err = rows.Scan(
+				&item.ID, &item.Title, &item.Slug,
+				&item.Logo, &item.CoverImage,
+				&item.Description, &item.Excerpt, &item.CareerOptions,
 				&item.IsPopular, &item.IsFeatured,
 			)
 		default:

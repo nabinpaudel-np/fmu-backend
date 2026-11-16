@@ -6,20 +6,16 @@ import (
 	"fmu-backend/internal/pagination"
 )
 
-// The response deliberately carries one item shape for all three entity
-// types: a natural-language question can span them ("universities in
-// Kathmandu that offer scholarships"), and the frontend renders one result
-// list. The `entity` field says what each row is, and `title` holds the
-// university's or college's name or the scholarship's title.
+// The response carries one item shape for all four entity types, so the
+// frontend can render one result list. The `entity` field says what each row
+// is and `title` holds its name.
 
 // ResultItem is one row in a result list.
 type ResultItem struct {
-	// Entity is the catalogue the row came from.
 	Entity string `json:"entity"`
 	ID     string `json:"id"`
 	Slug   string `json:"slug"`
-	// Title is the university's or college's name, or the scholarship's title.
-	Title string `json:"title"`
+	Title  string `json:"title"`
 
 	Logo         string `json:"logo,omitempty"`
 	CoverImage   string `json:"cover_image,omitempty"`
@@ -46,6 +42,10 @@ type ResultItem struct {
 	ProviderName string `json:"provider_name,omitempty"`
 	ProviderType string `json:"provider_type,omitempty"`
 
+	Description   string `json:"description,omitempty"`
+	Excerpt       string `json:"excerpt,omitempty"`
+	CareerOptions string `json:"career_options,omitempty"`
+
 	ApplicationDeadline *time.Time `json:"application_deadline,omitempty"`
 
 	IsPopular  bool `json:"is_popular"`
@@ -55,32 +55,22 @@ type ResultItem struct {
 // Interpretation tells the caller how the question was read. It is shown to
 // the user; nothing in it affects the query.
 type Interpretation struct {
-	// Entity is the catalogue the search ran against.
-	Entity string `json:"entity"`
-	// Assumptions explains any judgement the search made.
-	Assumptions string `json:"assumptions,omitempty"`
-	// Unmapped lists the parts of the question that matched no field.
-	Unmapped []string `json:"unmapped,omitempty"`
+	Entity      string   `json:"entity"`
+	Assumptions string   `json:"assumptions,omitempty"`
+	Unmapped    []string `json:"unmapped,omitempty"`
 }
 
 // SearchRequest is the request body.
 type SearchRequest struct {
-	// Query is the user's question in their own words.
-	Query string `json:"query" example:"universities in kathmandu that offer scholarships"`
-	// Page is 1-based.
-	Page int `json:"page,omitempty" example:"1"`
-	// PageSize caps the number of results. Defaults to 20, max 50.
-	PageSize int `json:"page_size,omitempty" example:"20"`
+	Query    string `json:"query" example:"universities in kathmandu that offer scholarships"`
+	Page     int    `json:"page,omitempty" example:"1"`
+	PageSize int    `json:"page_size,omitempty" example:"20"`
 }
 
 // SearchResponse is the payload of a successful search.
 type SearchResponse struct {
-	// Query is the question as it was received.
-	Query string `json:"query"`
-	// Interpretation describes how the question was understood.
-	Interpretation Interpretation `json:"interpretation"`
-	// Items holds the matching rows.
-	Items []ResultItem `json:"items"`
-	// Meta carries the pagination totals.
-	Meta pagination.Meta `json:"meta"`
+	Query          string          `json:"query"`
+	Interpretation Interpretation  `json:"interpretation"`
+	Items          []ResultItem    `json:"items"`
+	Meta           pagination.Meta `json:"meta"`
 }

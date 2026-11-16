@@ -8,9 +8,8 @@ import (
 )
 
 // The model speaks in two layers: a JSON DTO it produces, and a validated
-// Plan the compiler consumes. Nothing between the two may be trusted — the
-// DTO is re-read against the vocabulary here, and the compiler only ever
-// sees values that came out of this file.
+// Plan the compiler consumes. The DTO is re-read against the vocabulary
+// here, and the compiler only ever sees values that came out of this file.
 
 // FilterDTO is one constraint as the model writes it.
 type FilterDTO struct {
@@ -19,10 +18,23 @@ type FilterDTO struct {
 	Value any    `json:"value"`
 }
 
+// FilterGroupDTO is a set of constraints of which at least one must hold.
+type FilterGroupDTO struct {
+	Any []FilterDTO `json:"any"`
+}
+
+// ConditionDTO is one constraint in a plan: a plain filter or a group.
+type ConditionDTO struct {
+	Field string      `json:"field,omitempty"`
+	Op    string      `json:"op,omitempty"`
+	Value any         `json:"value,omitempty"`
+	Any   []FilterDTO `json:"any,omitempty"`
+}
+
 // RelatedDTO is a set of constraints on a related entity.
 type RelatedDTO struct {
-	Entity  string      `json:"entity"`
-	Filters []FilterDTO `json:"filters"`
+	Entity  string         `json:"entity"`
+	Filters []ConditionDTO `json:"filters"`
 }
 
 // SortDTO is the requested ordering.
@@ -31,16 +43,26 @@ type SortDTO struct {
 	Direction string `json:"direction"`
 }
 
-// FilterSetDTO is the model's entire output. It carries no prose the
-// application acts on: `assumptions` and `unmapped` are shown to the user,
-// never executed.
+// FilterSetDTO is the model's entire output. `assumptions` and `unmapped` are
+// shown to the user, never executed.
 type FilterSetDTO struct {
-	Entity      string       `json:"entity"`
-	Filters     []FilterDTO  `json:"filters"`
-	Related     []RelatedDTO `json:"related"`
-	Sort        *SortDTO     `json:"sort"`
-	Assumptions string       `json:"assumptions"`
-	Unmapped    []string     `json:"unmapped"`
+	Entity      string         `json:"entity"`
+	Filters     []ConditionDTO `json:"filters"`
+	Related     []RelatedDTO   `json:"related"`
+	Sort        *SortDTO       `json:"sort"`
+	Assumptions string         `json:"assumptions"`
+	Unmapped    []string       `json:"unmapped"`
+
+	Also []AlsoDTO `json:"also,omitempty"`
+}
+
+// AlsoDTO is one extra search over another catalogue.
+type AlsoDTO struct {
+	Entity      string         `json:"entity"`
+	Filters     []ConditionDTO `json:"filters"`
+	Related     []RelatedDTO   `json:"related"`
+	Sort        *SortDTO       `json:"sort"`
+	Assumptions string         `json:"assumptions,omitempty"`
 }
 
 // ValueKind is the type of a normalised filter value.
@@ -68,6 +90,7 @@ type FilterSpec struct {
 	Field string
 	Op    Op
 	Value Value
+	Any   []FilterSpec
 }
 
 // RelatedSpec is a validated set of constraints on a related entity.
@@ -92,6 +115,33 @@ type Plan struct {
 	Unmapped    []string
 }
 
+// Plans is a set of validated plans: one per catalogue a question spans.
+type Plans struct {
+	Primary *Plan
+	Others  []*Plan
+}
+
+// All returns every plan, the primary first.
+func (p *Plans) All() []*Plan {
+	if p == nil {
+		return nil
+	}
+	out := make([]*Plan, 0, len(p.Others)+1)
+	if p.Primary != nil {
+		out = append(out, p.Primary)
+	}
+	return append(out, p.Others...)
+}
+
+// Entities lists the catalogues the plans cover, the primary first.
+func (p *Plans) Entities() []string {
+	var out []string
+	for _, plan := range p.All() {
+		out = append(out, plan.Entity.Name)
+	}
+	return out
+}
+
 // ValidationError describes a filter the model got wrong.
 type ValidationError struct {
 	Field   string `json:"field"`
@@ -112,38 +162,79 @@ const maxAssumptionLength = 400
 // maxUnmappedItems caps how many unmapped clauses are reported back.
 const maxUnmappedItems = 5
 
-// Validate turns the model's DTO into a Plan. Every field name, operator and
-// value is checked against the vocabulary: an unknown field is refused rather
-// than ignored, because silently dropping it would return results that do
-// not answer the question.
-func Validate(dto *FilterSetDTO) (*Plan, *ValidationError) {
+// maxExtraPlans caps how many extra catalogues one question may span.
+const maxExtraPlans = 3
+
+// Validate turns the model's DTO into a set of plans. Every field name,
+func Validate(dto *FilterSetDTO) (*Plans, *ValidationError) {
 	if dto == nil {
 		return nil, &ValidationError{Message: "the model returned an empty filter set"}
 	}
 
-	entity, ok := entityByName(dto.Entity)
+	primary, verr := validatePlan(dto.Entity, dto.Filters, dto.Related, dto.Sort, dto.Assumptions, dto.Unmapped)
+	if verr != nil {
+		return nil, verr
+	}
+
+	plans := &Plans{Primary: primary}
+
+	seen := map[string]bool{primary.Entity.Name: true}
+	for _, also := range dto.Also {
+		if len(plans.Others) >= maxExtraPlans {
+			break
+		}
+		// The same catalogue twice is one search, not two. Skipping it
+		// keeps the results from showing the same row twice.
+		if seen[also.Entity] {
+			continue
+		}
+		other, verr := validatePlan(
+			also.Entity, also.Filters, also.Related, also.Sort,
+			also.Assumptions, nil,
+		)
+		if verr != nil {
+			return nil, verr
+		}
+		seen[also.Entity] = true
+		plans.Others = append(plans.Others, other)
+	}
+
+	return plans, nil
+}
+
+// validatePlan checks one catalogue's worth of filters and returns the plan
+// they describe.
+func validatePlan(
+	entityName string,
+	filters []ConditionDTO,
+	related []RelatedDTO,
+	sort *SortDTO,
+	assumptions string,
+	unmapped []string,
+) (*Plan, *ValidationError) {
+	entity, ok := entityByName(entityName)
 	if !ok {
 		return nil, &ValidationError{
 			Field:   "entity",
-			Message: fmt.Sprintf("unknown entity %q", dto.Entity),
+			Message: fmt.Sprintf("unknown entity %q", entityName),
 		}
 	}
 
 	plan := &Plan{
 		Entity:      entity,
-		Assumptions: truncate(strings.TrimSpace(dto.Assumptions), maxAssumptionLength),
-		Unmapped:    trimAll(dto.Unmapped, maxUnmappedItems),
+		Assumptions: truncate(strings.TrimSpace(assumptions), maxAssumptionLength),
+		Unmapped:    trimAll(unmapped, maxUnmappedItems),
 	}
 
-	for _, f := range dto.Filters {
-		spec, verr := validateFilter(entity, f)
+	for _, c := range filters {
+		spec, verr := validateCondition(entity, c)
 		if verr != nil {
 			return nil, verr
 		}
 		plan.Filters = append(plan.Filters, spec)
 	}
 
-	for _, rel := range dto.Related {
+	for _, rel := range related {
 		relation, ok := entity.Related[rel.Entity]
 		if !ok {
 			return nil, &ValidationError{
@@ -152,27 +243,81 @@ func Validate(dto *FilterSetDTO) (*Plan, *ValidationError) {
 			}
 		}
 		rs := RelatedSpec{Relation: relation}
-		for _, f := range rel.Filters {
-			spec, verr := validateFilter(relation.Entity, f)
+		for _, c := range rel.Filters {
+			spec, verr := validateCondition(relation.Entity, c)
 			if verr != nil {
 				return nil, verr
 			}
 			rs.Filters = append(rs.Filters, spec)
 		}
-		if len(rs.Filters) > 0 {
-			plan.Related = append(plan.Related, rs)
-		}
+		// A related group with no filters is still a constraint: it means
+		// "only rows that have one of these", which the compiler writes as an
+		// EXISTS with nothing but the join.
+		plan.Related = append(plan.Related, rs)
 	}
 
-	if dto.Sort != nil {
-		sort, verr := validateSort(entity, dto.Sort)
+	if sort != nil {
+		order, verr := validateSort(entity, sort)
 		if verr != nil {
 			return nil, verr
 		}
-		plan.Sort = sort
+		plan.Sort = order
 	}
 
 	return plan, nil
+}
+
+// validateCondition checks one constraint against a field definition.
+func validateCondition(entity *Entity, c ConditionDTO) (FilterSpec, *ValidationError) {
+	hasFilter := c.Field != ""
+	hasGroup := len(c.Any) > 0
+
+	switch {
+	case hasFilter && hasGroup:
+		return FilterSpec{}, &ValidationError{
+			Field:   c.Field,
+			Message: "a constraint is either one filter or a group of alternatives, not both",
+		}
+	case hasGroup:
+		return validateGroup(entity, c.Any)
+	case hasFilter:
+		return validateFilter(entity, FilterDTO{
+			Field: c.Field,
+			Op:    c.Op,
+			Value: c.Value,
+		})
+	default:
+		return FilterSpec{}, &ValidationError{
+			Message: "a constraint must name a field or list alternatives",
+		}
+	}
+}
+
+// validateGroup checks a set of alternatives.
+func validateGroup(entity *Entity, alternatives []FilterDTO) (FilterSpec, *ValidationError) {
+	if len(alternatives) == 0 {
+		return FilterSpec{}, &ValidationError{
+			Message: "a group of alternatives must list at least one",
+		}
+	}
+	// A group of one is just a filter, so writing it as a group is probably
+	// a mistake worth reporting.
+	if len(alternatives) == 1 {
+		return FilterSpec{}, &ValidationError{
+			Field:   alternatives[0].Field,
+			Message: "a group with one alternative is not a choice, write it as a plain filter",
+		}
+	}
+
+	spec := FilterSpec{}
+	for _, f := range alternatives {
+		alt, verr := validateFilter(entity, f)
+		if verr != nil {
+			return FilterSpec{}, verr
+		}
+		spec.Any = append(spec.Any, alt)
+	}
+	return spec, nil
 }
 
 // validateFilter checks one constraint against a field definition and
@@ -235,8 +380,6 @@ func validateSort(entity *Entity, s *SortDTO) (*SortSpec, *ValidationError) {
 }
 
 // normaliseValue coerces the model's value into the field's type. The model
-// is asked for typed JSON but is not trusted to comply, so numbers arriving
-// as strings and booleans arriving as "true" are both accepted.
 func normaliseValue(field Field, op Op, raw any) (Value, *ValidationError) {
 	invalid := func(reason string) *ValidationError {
 		return &ValidationError{Field: field.Name, Message: reason}
@@ -289,7 +432,7 @@ func normaliseValue(field Field, op Op, raw any) (Value, *ValidationError) {
 					return Value{}, invalid("expected a list of strings")
 				}
 				if s = strings.TrimSpace(s); s != "" {
-					out = append(out, s)
+					out = append(out, translateCode(field.Code, s))
 				}
 			}
 			if len(out) == 0 {
@@ -300,7 +443,7 @@ func normaliseValue(field Field, op Op, raw any) (Value, *ValidationError) {
 		switch v := raw.(type) {
 		case string:
 			if v = strings.TrimSpace(v); v != "" {
-				return Value{Kind: ValueString, Str: v}, nil
+				return Value{Kind: ValueString, Str: translateCode(field.Code, v)}, nil
 			}
 		case float64:
 			// Numbers are legitimate values for text columns ("founded in 1998").
@@ -310,6 +453,18 @@ func normaliseValue(field Field, op Op, raw any) (Value, *ValidationError) {
 	}
 
 	return Value{}, invalid("unsupported field type")
+}
+
+// translateCode turns a country or state name into the code the column
+// holds. A question says "the United States" where the catalogue says "US".
+func translateCode(code Code, value string) string {
+	switch code {
+	case CodeCountry:
+		return countryCode(value)
+	case CodeState:
+		return stateCode(value)
+	}
+	return value
 }
 
 // checkClosedVocabulary enforces a field's fixed value list.
