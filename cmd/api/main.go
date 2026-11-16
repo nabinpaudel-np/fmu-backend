@@ -181,7 +181,11 @@ func main() {
 	nlRepo := nlsearch.NewRepository(pool)
 	nlSvc := nlsearch.NewService(interpreter, nlRepo)
 	nlHandler := nlsearch.NewHandler(nlSvc)
-	nlLimiter := nlsearch.NewRateLimiter(20, 5)
+	// The provider's free allowance is counted per minute for the whole
+	// project, so the app's own limit sits under it: a request the app
+	// refuses costs nothing, while a request the provider refuses costs a
+	// slot in the day's allowance.
+	nlLimiter := nlsearch.NewRateLimiter(10, 5)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)

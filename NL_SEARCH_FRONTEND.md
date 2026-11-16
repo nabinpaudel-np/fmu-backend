@@ -107,7 +107,7 @@ Content-Type: application/json
     "query": "universities in Kathmandu Nepal that offer scholarships",
     "interpretation": {
       "entity": "universities",
-      "assumptions": "read \"great scholarship\" as merit scholarships worth a substantial amount",
+      "assumptions": "searched the universities catalogue; read \"great scholarship\" as merit scholarships worth a substantial amount",
       "unmapped": ["\"get into\""]
     },
     "items": [
@@ -145,15 +145,15 @@ Content-Type: application/json
 
 ### The result item
 
-One shape for all three catalogues, because a question can span them. The
+One shape for all four catalogues, because a question can span them. The
 `entity` field says what each row is.
 
 | Field | Type | Notes |
 |---|---|---|
-| `entity` | string | `"universities"`, `"colleges"` or `"scholarships"` |
+| `entity` | string | `"universities"`, `"colleges"`, `"scholarships"` or `"programs"` |
 | `id` | string | UUID |
-| `slug` | string | Use this to link to the existing detail page |
-| `title` | string | The university's or college's name, or the scholarship's title |
+| `slug` | string | Use this to link to the existing detail page. For a programme it is the programme's title, since a programme has no slug of its own. |
+| `title` | string | The university's or college's name, the scholarship's title, or the programme's name |
 | `logo` | string? | Absolute URL. May be absent. Scholarships have no `cover_image`. |
 | `cover_image` | string? | Absolute URL. May be absent. |
 | `country`, `state`, `city`, `full_location` | string? | May be absent |
@@ -167,12 +167,13 @@ One shape for all three catalogues, because a question can span them. The
 | `min_gpa` | number? | Scholarships. May be absent. |
 | `provider_name`, `provider_type` | string? | Scholarships. May be absent. |
 | `application_deadline` | string? | Scholarships — ISO 8601 timestamp, may be `null` |
-| `is_popular`, `is_featured` | bool | Always present |
+| `description`, `excerpt`, `career_options` | string? | Programmes. May be absent. |
+| `is_popular`, `is_featured` | bool | Always present. Always `false` for a programme. |
 
 **Fields not in this list are not in the response.** In particular there is no
-`overview`, no `excerpt`, no `seo_*`, no `description` — the endpoint returns
-summary fields only. If your card needs more, fetch the existing detail
-endpoint using `slug` for the row the user clicks.
+`overview`, no `seo_*` — the endpoint returns summary fields only. If your
+card needs more, fetch the existing detail endpoint using `slug` for the row
+the user clicks.
 
 ### The interpretation
 
@@ -182,8 +183,8 @@ understood me".
 
 | Field | Type | Notes |
 |---|---|---|
-| `entity` | string | Which catalogue was searched |
-| `assumptions` | string? | Any judgement the search made, e.g. how a vague word was mapped to a field. May be empty. |
+| `entity` | string | Which catalogue was searched. A question that spans more than one catalogue lists them all, separated by commas, e.g. `"universities, colleges"`. |
+| `assumptions` | string? | Which catalogue was searched, plus any judgement the search made, e.g. how a vague word was mapped to a field. May be empty. |
 | `unmapped` | string[]? | Parts of the question that matched no field. May be absent. |
 
 Suggested treatment: show `assumptions` as a small note above the results
@@ -203,20 +204,22 @@ The standard envelope applies: `{ "success": false, "error": "..." }`, with
 | `422` | The question could not be turned into a valid search | Show the error and suggest rephrasing |
 | `429` | Too many searches | Show "slow down"; respect the `Retry-After` header |
 | `502` | The model was reached but could not answer | Show a "try rephrasing" message |
-| `503` | The feature is switched off on the server, or the model's allowance for the day is spent | Show "search is unavailable right now" |
+| `503` | The feature is switched off on the server, the model's allowance for the day is spent, the model is busy, or the provider is rate limiting | Show "search is unavailable right now" |
 | `500` | Anything else | Generic error |
 
-**Handle `503` properly.** It means one of two things: the backend has no
-language model configured, or the model provider's daily allowance is spent.
-The second is a server-side state, not a bug, and it is expected in local
-development — the free tier of the Gemini API allows only about twenty
-requests a day per model, and a single search spends two of them. The page
-should show a clear "not available" state rather than an error toast, and it
-should not invite the user to rephrase: the question was fine, the server
-simply could not ask the model.
+**Handle `503` properly.** It means one of four things: the backend has no
+language model configured, the model provider's daily allowance is spent, the
+provider is saturated, or the provider is rate limiting. All four are
+server-side states, not a bad question, and none of them is fixed by
+rephrasing. The page should show a clear "not available" state rather than an
+error toast, and it should not invite the user to rephrase: the question was
+fine, the server simply could not ask the model.
+
+A `503` may carry a `Retry-After` header saying how many seconds to wait.
+Honour it if you show a retry affordance.
 
 **Handle `429` properly.** The endpoint is rate limited per signed-in user
-(or per IP when signed out): 20 requests per minute, with a burst of 5. The
+(or per IP when signed out): 10 requests per minute, with a burst of 5. The
 `Retry-After` header says how long to wait in seconds.
 
 ---
@@ -232,7 +235,7 @@ simply could not ask the model.
 const BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3000";
 
 export type NlSearchItem = {
-  entity: "universities" | "colleges" | "scholarships";
+  entity: "universities" | "colleges" | "scholarships" | "programs";
   id: string;
   slug: string;
   title: string;
@@ -257,6 +260,9 @@ export type NlSearchItem = {
   provider_name?: string;
   provider_type?: string;
   application_deadline?: string | null;
+  description?: string;
+  excerpt?: string;
+  career_options?: string;
   is_popular: boolean;
   is_featured: boolean;
 };
@@ -390,12 +396,21 @@ question about universities can filter on the scholarships those universities
 offer, and the results are still university rows. A row's `entity` always
 says what it is.
 
+**The catalogue is chosen by the server, not by the question's grammar.** The
+server picks the catalogue from the words in the question — the first of
+university, college or scholarship it recognises wins, and a question that
+names none is about universities. `interpretation.assumptions` says which
+catalogue was searched, so show it if the user needs to know why the results
+look like what they do.
+
 **Results are ranked by relevance** when the question mentions something in
 passing ("universities like Kathmandu University"), otherwise by name.
 
-**The endpoint is slower than a normal search.** It makes two model calls
-before it queries the database — one to decide which catalogue the question is
-about, one to turn it into filters. Expect roughly two to six seconds. Show a
+**The endpoint is slower than a normal search.** It makes one model call before
+it queries the database — the catalogue is chosen by the server itself, and
+the model only turns the question into filters. Expect roughly one to four
+seconds. A question that has been asked recently is answered from a short-lived
+server-side cache with no model call at all, and comes back faster. Show a
 loading state, and debounce or use a submit button rather than firing on every
 keystroke.
 
