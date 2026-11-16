@@ -10,15 +10,15 @@ type Config struct {
 	AppEnv string `env:"APP_ENV" envDefault:"development"`
 	Port   string `env:"PORT" envDefault:"8080"`
 
-	DBHost             string        `env:"DB_HOST,required"`
-	DBUser             string        `env:"DB_USER,required"`
-	DBPassword         string        `env:"DB_PASSWORD,required"`
-	DBName             string        `env:"DB_NAME,required"`
-	DBPort             int           `env:"DB_PORT" envDefault:"5432"`
-	DatabaseURL        string        `env:"DATABASE_URL" envDefault:""`
-	AccessTokenSecret  string        `env:"ACCESS_TOKEN_SECRET,required"`
-	AccessTokenExpiry  time.Duration `env:"ACCESS_TOKEN_EXPIRY" envDefault:"60m"`
-	RefreshTokenExpiry time.Duration `env:"REFRESH_TOKEN_EXPIRY" envDefault:"168h"`
+	DBHost              string        `env:"DB_HOST,required"`
+	DBUser              string        `env:"DB_USER,required"`
+	DBPassword          string        `env:"DB_PASSWORD,required"`
+	DBName              string        `env:"DB_NAME,required"`
+	DBPort              int           `env:"DB_PORT" envDefault:"5432"`
+	DatabaseURL         string        `env:"DATABASE_URL" envDefault:""`
+	AccessTokenSecret   string        `env:"ACCESS_TOKEN_SECRET,required"`
+	AccessTokenExpiry   time.Duration `env:"ACCESS_TOKEN_EXPIRY" envDefault:"60m"`
+	RefreshTokenExpiry  time.Duration `env:"REFRESH_TOKEN_EXPIRY" envDefault:"168h"`
 	PasswordResetExpiry time.Duration `env:"PASSWORD_RESET_EXPIRY" envDefault:"1h"`
 
 	GoogleClientID     string `env:"GOOGLE_CLIENT_ID,required"`
@@ -36,6 +36,29 @@ type Config struct {
 	Cloudinary CloudinaryConfig `envPrefix:"CLOUDINARY_"`
 	Supabase   SupabaseConfig   `envPrefix:"SUPABASE_"`
 	Mail       MailConfig       `envPrefix:"MAIL_"`
+	Gemini     GeminiConfig     `envPrefix:"GEMINI_"`
+}
+
+// GeminiConfig holds the language-model credentials used by the
+// natural-language search endpoint.
+//
+//	GEMINI_API_KEY  the API key (optional)
+//	GEMINI_MODEL    the model to use (default "gemini-3.5-flash-lite")
+//
+// The key is optional on purpose: the app must still boot without a model,
+// and the endpoint reports that it is unavailable rather than taking the
+// rest of the API down with it.
+//
+// The free tier's daily allowance is counted per model, and the models are
+// not treated alike: gemini-3.5-flash-lite and gemini-3.1-flash-lite allow
+// 500 requests a day, while gemini-3.8-flash, gemini-3.6-flash,
+// gemini-3-flash, gemini-2.5-flash and gemini-2.5-flash-lite allow only 20.
+// "flash-lite" is therefore not a safe label to reason with — gemini-2.5-
+// flash-lite is on the short allowance. The default is the model with the
+// generous one.
+type GeminiConfig struct {
+	APIKey string `env:"API_KEY"`
+	Model  string `env:"MODEL" envDefault:"gemini-3.5-flash-lite"`
 }
 
 type CloudinaryConfig struct {
@@ -64,14 +87,14 @@ type SupabaseConfig struct {
 //	SMTP_STARTTLS   enable STARTTLS (default true)
 //	SMTP_SSL_TLS    connect over implicit TLS / SMTPS (default false)
 type MailConfig struct {
-	Username  string `env:"USERNAME,required"`
-	Password  string `env:"PASSWORD,required"`
-	From      string `env:"FROM"`
-	FromName  string `env:"FROM_NAME" envDefault:""`
-	Server    string `env:"SERVER" envDefault:"smtp.gmail.com"`
-	Port      int    `env:"PORT" envDefault:"587"`
-	StartTLS  bool   `env:"STARTTLS" envDefault:"true"`
-	SSLTLS    bool   `env:"SSL_TLS" envDefault:"false"`
+	Username string `env:"USERNAME,required"`
+	Password string `env:"PASSWORD,required"`
+	From     string `env:"FROM"`
+	FromName string `env:"FROM_NAME" envDefault:""`
+	Server   string `env:"SERVER" envDefault:"smtp.gmail.com"`
+	Port     int    `env:"PORT" envDefault:"587"`
+	StartTLS bool   `env:"STARTTLS" envDefault:"true"`
+	SSLTLS   bool   `env:"SSL_TLS" envDefault:"false"`
 }
 
 func Load() (*Config, error) {

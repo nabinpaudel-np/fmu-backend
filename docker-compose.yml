@@ -82,6 +82,12 @@ services:
       MAIL_STARTTLS: ${MAIL_STARTTLS:-true}
       MAIL_SSL_TLS: ${MAIL_SSL_TLS:-false}
 
+      # Natural-language search. The key stays on the server; without it the
+      # endpoint reports itself as unavailable and the catalogue's own search
+      # endpoints keep working.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.5-flash-lite}
+
     volumes:
       # Source bind-mount — edits on the host are seen by Air inside the container
       - .:/app
