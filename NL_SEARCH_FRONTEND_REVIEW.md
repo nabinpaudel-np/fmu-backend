@@ -11,6 +11,11 @@ smaller issues sit underneath that.
 Everything below was checked against the running backend on
 `POST /api/v1/nl-search`, not against the documentation.
 
+> **Update:** items 1, 2 and 5 have been fixed on the frontend branch
+> `fix/nlsearch-program-slug` (commit `f9195b6`). Item 3 is worked around in
+> the frontend and should be fixed in the backend. Item 4 is a deployment
+> setting. The findings are kept below as they were written.
+
 ---
 
 ## What is correct
