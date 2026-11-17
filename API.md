@@ -18,18 +18,19 @@ Backend API for the FMU (Find My University) application. This document covers e
 5. [Pagination](#pagination)
 6. [Validation errors](#validation-errors)
 7. [HTTP status codes](#http-status-codes)
-8. [Auth endpoints](#auth-endpoints)
-9. [University endpoints](#university-endpoints)
-10. [College endpoints](#college-endpoints)
-11. [Uploads endpoints](#uploads-endpoints)
-12. [Favorites endpoints](#favorites-endpoints)
-13. [Claim endpoints](#claim-endpoints)
-14. [Lookup reference data](#lookup-reference-data)
-15. [Program endpoints](#program-endpoints)
-16. [Scholarship endpoints](#scholarship-endpoints)
-17. [Drafts and publishing](#drafts-and-publishing)
-18. [Frontend integration checklist](#putting-it-all-together--frontend-integration-checklist)
-19. [CORS](#cors)
+8. [Health endpoints](#health-endpoints)
+9. [Auth endpoints](#auth-endpoints)
+10. [University endpoints](#university-endpoints)
+11. [College endpoints](#college-endpoints)
+12. [Uploads endpoints](#uploads-endpoints)
+13. [Favorites endpoints](#favorites-endpoints)
+14. [Claim endpoints](#claim-endpoints)
+15. [Lookup reference data](#lookup-reference-data)
+16. [Program endpoints](#program-endpoints)
+17. [Scholarship endpoints](#scholarship-endpoints)
+18. [Drafts and publishing](#drafts-and-publishing)
+19. [Frontend integration checklist](#putting-it-all-together--frontend-integration-checklist)
+20. [CORS](#cors)
 
 ---
 
@@ -260,6 +261,92 @@ Array fields report the index in the field name, e.g. `GalleryImages[2]` for the
 | `404`  | Resource not found                                                               |
 | `409`  | Conflict (e.g. duplicate slug, email already registered)                         |
 | `500`  | Server error — try again, contact backend if persistent                          |
+
+---
+
+## Health endpoints
+
+These answer whether the service is up and whether it can take traffic. None
+of them needs a session.
+
+### GET `/health`
+
+Liveness. The process is up and serving. It checks nothing that can fail on
+its own, so a failure here means the process itself is broken.
+
+```json
+{
+  "status": "ok"
+}
+```
+
+### GET `/health/ready`
+
+Readiness. The process can take traffic. The database is checked, because a
+process that cannot reach the database cannot answer a request.
+
+```json
+{
+  "status": "ok"
+}
+```
+
+When the database cannot be reached the answer is `503`:
+
+```json
+{
+  "status": "not ready",
+  "error": "database unreachable: ..."
+}
+```
+
+### GET `/health/ai`
+
+The state of the language model used by natural-language search. The model is
+the one dependency that can fail while the rest of the API keeps working: the
+day's allowance can run out, a key can be rejected, the provider can be busy.
+
+```json
+{
+  "status": "ok",
+  "model": "gemini-3.5-flash-lite",
+  "keys": [
+    { "index": 1, "available": true },
+    { "index": 2, "available": true }
+  ],
+  "keys_available": 2,
+  "keys_total": 2
+}
+```
+
+A key that is out of allowance carries the wait before it is tried again:
+
+```json
+{
+  "index": 1,
+  "available": false,
+  "retry_after_seconds": 300
+}
+```
+
+The status is `no key available` with `503` when every key is spent:
+
+```json
+{
+  "status": "no key available",
+  "model": "gemini-3.5-flash-lite",
+  "keys": [{ "index": 1, "available": false, "retry_after_seconds": 60 }],
+  "keys_available": 0,
+  "keys_total": 1,
+  "message": "every key is out of allowance, natural-language search will fail until one recovers"
+}
+```
+
+When no model is configured at all the answer is `503` with
+`"status": "not configured"`.
+
+This endpoint does not call the provider, so it never spends any of the day's
+allowance. The key itself is never included in the response.
 
 ---
 

@@ -78,6 +78,42 @@ type GeminiInterpreter struct {
 	thinking atomic.Int32
 }
 
+// KeyStatus is the state of one key.
+type KeyStatus struct {
+	// Index is the key's position in the list, starting at one.
+	Index int `json:"index"`
+	// Available reports whether the key can be used right now. A key whose
+	// day's allowance is spent is not available until its wait is over.
+	Available bool `json:"available"`
+	// RetryAfterSeconds is how long until the key is tried again. Zero
+	// when the key is available.
+	RetryAfterSeconds int `json:"retry_after_seconds,omitempty"`
+}
+
+// KeyStatuses reports the state of every key. The key itself is never
+// included, so the report can be shown or logged safely.
+func (g *GeminiInterpreter) KeyStatuses() []KeyStatus {
+	now := time.Now()
+	out := make([]KeyStatus, 0, len(g.providers))
+	for i, p := range g.providers {
+		until := p.exhaustedUntil.Load()
+		status := KeyStatus{Index: i + 1, Available: until == 0 || now.Unix() >= until}
+		if !status.Available {
+			status.RetryAfterSeconds = int(until - now.Unix())
+			if status.RetryAfterSeconds < 0 {
+				status.RetryAfterSeconds = 0
+			}
+		}
+		out = append(out, status)
+	}
+	return out
+}
+
+// Model reports the model in use.
+func (g *GeminiInterpreter) Model() string {
+	return g.model
+}
+
 // provider is one key and the client built from it.
 type provider struct {
 	client *genai.Client

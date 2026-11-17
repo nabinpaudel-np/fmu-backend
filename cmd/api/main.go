@@ -22,6 +22,7 @@ import (
 	"fmu-backend/internal/db"
 	"fmu-backend/internal/db/sqlc"
 	"fmu-backend/internal/favorites"
+	"fmu-backend/internal/health"
 	"fmu-backend/internal/mail"
 	"fmu-backend/internal/nlsearch"
 	"fmu-backend/internal/oauth"
@@ -183,6 +184,13 @@ func main() {
 	} else {
 		log.Println("nl-search: no gemini key set, natural-language search is disabled")
 	}
+	// The health endpoint reports the state of the model, so it needs the
+	// interpreter. It is nil when no key is configured.
+	var aiReporter health.AIStatus
+	if gemini, ok := interpreter.(*nlsearch.GeminiInterpreter); ok {
+		aiReporter = gemini
+	}
+
 	nlRepo := nlsearch.NewRepository(pool)
 	nlSvc := nlsearch.NewService(interpreter, nlRepo)
 	nlHandler := nlsearch.NewHandler(nlSvc)
@@ -214,6 +222,10 @@ func main() {
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
+
+	// Registered before the others so a platform probe never waits behind
+	// the rate limiter or anything else.
+	health.RegisterRoutes(r, health.NewHandler(pool, aiReporter))
 
 	auth.RegisterRoutes(r, authHandler, authMW)
 	university.RegisterRoutes(r, universityHandler, authMW, adminMW, optionalAuthMW)
