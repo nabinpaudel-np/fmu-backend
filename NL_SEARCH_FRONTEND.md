@@ -20,10 +20,22 @@ unavailable and the rest of the API keeps working.
 
 | Variable | Required | Notes |
 |---|---|---|
-| `GEMINI_API_KEY` | no | The preferred key. The endpoint is disabled when it and the list below are both empty. |
-| `GEMINI_API_KEYS` | no | Extra keys, comma separated, tried in order when one before them is exhausted. |
+| `GEMINI_API_KEYS` | no | The keys, comma separated. This one on its own is enough. |
+| `GEMINI_API_KEY` | no | A single key. This one on its own is enough too. |
 | `GEMINI_MODEL` | no | Defaults to `gemini-3.5-flash-lite`. |
 | `ALLOWED_ORIGINS` | yes | The frontend's origin, so the browser accepts the reply. |
+
+Either key variable on its own works — use whichever is easier:
+
+```bash
+GEMINI_API_KEYS=key1,key2,key3
+```
+
+```bash
+GEMINI_API_KEY=key1
+```
+
+Setting both is allowed: the single key is tried first and the list follows.
 
 **The extra keys must come from a different account.** The provider counts
 the day's allowance per project, and every key belongs to a project, so a

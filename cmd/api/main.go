@@ -169,18 +169,19 @@ func main() {
 	// still boots, the endpoint reports itself as unavailable, and the
 	// catalogue's own search endpoints keep serving the frontend.
 	var interpreter nlsearch.Interpreter
-	keys := append([]string{cfg.Gemini.APIKey}, cfg.Gemini.APIKeys...)
-	if len(nlsearch.UsableKeys(keys)) > 0 {
+	// Either variable on its own is enough. When both are set the single
+	// key leads and the list follows, so an existing deployment keeps the
+	// key it already had.
+	keys := nlsearch.UsableKeys(append([]string{cfg.Gemini.APIKey}, cfg.Gemini.APIKeys...))
+	if len(keys) > 0 {
 		gemini, err := nlsearch.NewGeminiInterpreterWithKeys(context.Background(), keys, cfg.Gemini.Model)
 		if err != nil {
 			log.Fatalf("gemini init failed: %v", err)
 		}
 		interpreter = gemini
-		if len(keys) > 1 {
-			log.Printf("nl-search: %d gemini keys configured", len(nlsearch.UsableKeys(keys)))
-		}
+		log.Printf("nl-search: %d gemini key(s) configured", len(keys))
 	} else {
-		log.Println("nl-search: GEMINI_API_KEY not set, natural-language search is disabled")
+		log.Println("nl-search: no gemini key set, natural-language search is disabled")
 	}
 	nlRepo := nlsearch.NewRepository(pool)
 	nlSvc := nlsearch.NewService(interpreter, nlRepo)
