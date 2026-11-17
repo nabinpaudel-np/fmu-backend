@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -59,8 +60,11 @@ func (e *retryableError) Unwrap() error { return e.err }
 
 // GeminiInterpreter talks to the Gemini API.
 type GeminiInterpreter struct {
-	client *genai.Client
-	model  string
+	// providers are the keys in the order they are tried. The first is the
+	// preferred one; the rest are only reached when one before them is
+	// exhausted.
+	providers []*provider
+	model     string
 
 	// slots bounds how many model calls are in flight at once across the
 	// whole process. The provider's allowance is shared by everyone using the
@@ -73,6 +77,34 @@ type GeminiInterpreter struct {
 	// would double what each search costs.
 	thinking atomic.Int32
 }
+
+// provider is one key and the client built from it.
+type provider struct {
+	client *genai.Client
+
+	// exhaustedUntil is when this key may be tried again. A key whose day's
+	// allowance is spent stays out of the rotation until then, so a search
+	// does not pay a failed request every time.
+	exhaustedUntil atomic.Int64
+}
+
+// available reports whether the key may be used right now.
+func (p *provider) available(now time.Time) bool {
+	until := p.exhaustedUntil.Load()
+	return until == 0 || now.Unix() >= until
+}
+
+// exhaust marks the key as unusable until the given time.
+func (p *provider) exhaust(until time.Time) {
+	if until.IsZero() {
+		until = time.Now().Add(defaultExhaustion)
+	}
+	p.exhaustedUntil.Store(until.Unix())
+}
+
+// defaultExhaustion is how long a key is skipped when the provider did not
+// say how long to wait.
+const defaultExhaustion = 5 * time.Minute
 
 // modelSlots is how many model calls may run at once.
 const modelSlots = 2
@@ -114,40 +146,81 @@ const (
 // NewGeminiInterpreter builds an interpreter. An empty API key returns
 // ErrProviderUnavailable: the app must still boot without a model.
 func NewGeminiInterpreter(ctx context.Context, apiKey, model string) (*GeminiInterpreter, error) {
-	return newGeminiInterpreter(ctx, apiKey, model, "")
+	return NewGeminiInterpreterWithKeys(ctx, []string{apiKey}, model)
+}
+
+// NewGeminiInterpreterWithKeys builds an interpreter over several keys. The
+// keys are tried in order: the first is preferred, and the rest are only
+// reached when one before them is exhausted.
+//
+// Every key must belong to a different project to have its own allowance.
+// The provider counts the day's allowance per project, so a second key from
+// the same project shares the first one's quota and adds nothing.
+func NewGeminiInterpreterWithKeys(ctx context.Context, apiKeys []string, model string) (*GeminiInterpreter, error) {
+	keys := UsableKeys(apiKeys)
+	if len(keys) == 0 {
+		return nil, ErrProviderUnavailable
+	}
+	return newGeminiInterpreter(ctx, keys, model, "")
+}
+
+// UsableKeys drops the empty and repeated keys, keeping the order they were
+// given in.
+func UsableKeys(apiKeys []string) []string {
+	seen := make(map[string]bool, len(apiKeys))
+	out := make([]string, 0, len(apiKeys))
+	for _, key := range apiKeys {
+		key = strings.TrimSpace(key)
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, key)
+	}
+	return out
 }
 
 // newGeminiInterpreter builds an interpreter against a given base URL. An
 // empty base URL means the provider's own.
-func newGeminiInterpreter(ctx context.Context, apiKey, model, baseURL string) (*GeminiInterpreter, error) {
-	if strings.TrimSpace(apiKey) == "" {
+func newGeminiInterpreter(ctx context.Context, apiKeys []string, model, baseURL string) (*GeminiInterpreter, error) {
+	if len(apiKeys) == 0 {
 		return nil, ErrProviderUnavailable
 	}
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		APIKey: apiKey,
-		// The Gemini API reports a busy model as a 503 and a busy quota as a
-		// 429. A busy model is momentary, so the request is retried once
-		// rather than being reported to the user as a failure.
-		//
-		// The retryable codes are listed explicitly because the default set
-		// includes 429, and the free tier's allowance is counted in requests
-		// per day: retrying a 429 spends three more of the day's allowance
-		// to reach the same answer. Only the codes worth waiting out are
-		// retried, and only twice.
-		HTTPOptions: genai.HTTPOptions{
-			BaseURL: baseURL,
-			RetryOptions: &genai.HTTPRetryOptions{
-				Attempts:        genai.Ptr[int32](2),
-				InitialDelay:    genai.Ptr[float64](1),
-				MaxDelay:        genai.Ptr[float64](4),
-				HTTPStatusCodes: []int32{500, 502, 503, 504},
+
+	providers := make([]*provider, 0, len(apiKeys))
+	for _, apiKey := range apiKeys {
+		client, err := genai.NewClient(ctx, &genai.ClientConfig{
+			APIKey: apiKey,
+			// The Gemini API reports a busy model as a 503 and a busy quota as a
+			// 429. A busy model is momentary, so the request is retried once
+			// rather than being reported to the user as a failure.
+			//
+			// The retryable codes are listed explicitly because the default set
+			// includes 429, and the free tier's allowance is counted in requests
+			// per day: retrying a 429 spends three more of the day's allowance
+			// to reach the same answer. Only the codes worth waiting out are
+			// retried, and only twice.
+			HTTPOptions: genai.HTTPOptions{
+				BaseURL: baseURL,
+				RetryOptions: &genai.HTTPRetryOptions{
+					Attempts:        genai.Ptr[int32](2),
+					InitialDelay:    genai.Ptr[float64](1),
+					MaxDelay:        genai.Ptr[float64](4),
+					HTTPStatusCodes: []int32{500, 502, 503, 504},
+				},
 			},
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create gemini client: %w", err)
+		})
+		if err != nil {
+			return nil, fmt.Errorf("create gemini client: %w", err)
+		}
+		providers = append(providers, &provider{client: client})
 	}
-	return &GeminiInterpreter{client: client, model: model, slots: newSemaphore(modelSlots)}, nil
+
+	return &GeminiInterpreter{
+		providers: providers,
+		model:     model,
+		slots:     newSemaphore(modelSlots),
+	}, nil
 }
 
 // Interpret asks the model to translate the question into a filter set.
@@ -182,6 +255,10 @@ func (g *GeminiInterpreter) Interpret(ctx context.Context, req InterpretRequest)
 }
 
 // generate asks the model and returns the text it produced.
+//
+// The keys are tried in order. A key that is exhausted is skipped, and the
+// next one is tried instead. The error from the last key tried is the one
+// reported, so a request only fails once every key has been tried.
 func (g *GeminiInterpreter) generate(ctx context.Context, prompt string, config *genai.GenerateContentConfig) (string, error) {
 	if err := g.slots.acquire(ctx); err != nil {
 		return "", err
@@ -194,7 +271,41 @@ func (g *GeminiInterpreter) generate(ctx context.Context, prompt string, config 
 		config = withoutThinking(config)
 	}
 
-	resp, err := g.client.Models.GenerateContent(ctx, g.model, contents, config)
+	var lastErr error
+	for i, p := range g.providers {
+		if !p.available(time.Now()) {
+			lastErr = ErrProviderQuotaExceeded
+			continue
+		}
+
+		text, err := g.call(ctx, p, contents, config)
+		if err == nil {
+			return text, nil
+		}
+		lastErr = err
+
+		// The failure is the key's, not the question's: try the next one.
+		if !isKeyFailure(err) {
+			return "", err
+		}
+		p.exhaust(exhaustUntil(err))
+		log.Printf("nl-search: gemini key %d failed (%v), trying the next key", i+1, err)
+	}
+
+	if lastErr == nil {
+		lastErr = ErrProviderUnavailable
+	}
+	return "", lastErr
+}
+
+// call asks one key for the text and returns it.
+func (g *GeminiInterpreter) call(
+	ctx context.Context,
+	p *provider,
+	contents []*genai.Content,
+	config *genai.GenerateContentConfig,
+) (string, error) {
+	resp, err := p.client.Models.GenerateContent(ctx, g.model, contents, config)
 	if err != nil && isRefused(err) && config.ThinkingConfig != nil {
 		// The model rejected the request itself, not the question. Some
 		// models do not accept a thinking configuration at all, and asking
@@ -202,7 +313,7 @@ func (g *GeminiInterpreter) generate(ctx context.Context, prompt string, config 
 		// only believed when that second attempt succeeds: a 400 that
 		// survives the retry was never about the thinking.
 		plain := withoutThinking(config)
-		resp, err = g.client.Models.GenerateContent(ctx, g.model, contents, plain)
+		resp, err = p.client.Models.GenerateContent(ctx, g.model, contents, plain)
 		if err == nil {
 			g.thinking.Store(thinkingRefused)
 		}
@@ -224,6 +335,29 @@ func (g *GeminiInterpreter) generate(ctx context.Context, prompt string, config 
 		return "", ErrProviderFailed
 	}
 	return text, nil
+}
+
+// isKeyFailure reports whether the error is the key's rather than the
+// question's. A key that is out of allowance, refused or busy is worth
+// trying on another key; a malformed question is not.
+func isKeyFailure(err error) bool {
+	switch {
+	case errors.Is(err, ErrProviderQuotaExceeded),
+		errors.Is(err, ErrProviderRateLimited),
+		errors.Is(err, ErrProviderBusy),
+		errors.Is(err, ErrProviderUnavailable):
+		return true
+	}
+	return false
+}
+
+// exhaustUntil is how long the key should be skipped for.
+func exhaustUntil(err error) time.Time {
+	var retryable *retryableError
+	if errors.As(err, &retryable) && retryable.retryAfter > 0 {
+		return time.Now().Add(retryable.retryAfter)
+	}
+	return time.Time{}
 }
 
 // noThinking asks the model to answer directly.
@@ -272,9 +406,36 @@ func providerError(err error) error {
 			}
 		case http.StatusUnauthorized, http.StatusForbidden, http.StatusPaymentRequired:
 			return fmt.Errorf("%w: %s", ErrProviderUnavailable, apiErr.Message)
+		case http.StatusBadRequest:
+			// A bad request is normally the question's fault, but an
+			// invalid or revoked key is reported this way too. The
+			// provider says so in the message, and the key is worth
+			// replacing rather than giving up on.
+			if isKeyRejection(apiErr.Message) {
+				return fmt.Errorf("%w: %s", ErrProviderUnavailable, apiErr.Message)
+			}
 		}
 	}
 	return fmt.Errorf("%w: %v", ErrProviderFailed, err)
+}
+
+// isKeyRejection reports whether a bad request was really about the key.
+// The provider reports an invalid or revoked key as a 400 rather than a 401.
+func isKeyRejection(message string) bool {
+	lower := strings.ToLower(message)
+	for _, phrase := range []string{
+		"api key not valid",
+		"api key invalid",
+		"invalid api key",
+		"api key expired",
+		"permission denied",
+		"credentials",
+	} {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 // retryDelay reads the wait the provider asked for out of an error's
@@ -382,7 +543,11 @@ func filterSetSchema() *genai.Schema {
 	return &genai.Schema{
 		Type:       genai.TypeObject,
 		Properties: properties,
-		Required:   []string{"entity", "filters"},
+		// "filters" is not required: a question can be answered by an
+		// ordering alone ("cheapest universities"). Requiring it made the
+		// model invent a filter to satisfy the schema, which turned a
+		// superlative into a filter that matched nothing.
+		Required: []string{"entity"},
 	}
 }
 

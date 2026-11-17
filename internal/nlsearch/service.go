@@ -88,8 +88,12 @@ func (s *service) Search(ctx context.Context, req SearchRequest) (*SearchRespons
 
 	s.cache.Put(cacheKey, plans)
 
-	log.Printf("nl-search: %q -> %s (%d filters, %d related groups, %d catalogues)",
-		query, plans.Primary.Entity.Name, len(plans.Primary.Filters),
+	sortLabel := "none"
+	if plans.Primary.Sort != nil {
+		sortLabel = plans.Primary.Sort.Field + " " + plans.Primary.Sort.Direction
+	}
+	log.Printf("nl-search: %q -> %s (search=%q, sort=%s, %d filters, %d related groups, %d catalogues)",
+		query, plans.Primary.Entity.Name, plans.Primary.Search, sortLabel, len(plans.Primary.Filters),
 		len(plans.Primary.Related), len(plans.All()))
 
 	return s.run(ctx, req, query, plans, plans.Primary.Assumptions)
@@ -108,16 +112,42 @@ func (s *service) run(ctx context.Context, req SearchRequest, query string, plan
 		page.PageSize = maxPageSize
 	}
 
-	items := make([]ResultItem, 0, page.PageSize)
-	var total int64
+	// A question can span several catalogues. Each one is searched on its
+	// own and the rows are combined, so the page is taken from the combined
+	// list rather than from each catalogue separately. Taking a page from
+	// each would return more rows than asked for, and page two would skip
+	// the rows that were not shown on page one.
+	all := plans.All()
 
-	for _, plan := range plans.All() {
-		rows, count, err := s.repo.Search(ctx, plan, page)
+	limit := page.Limit()
+	offset := page.Offset()
+
+	// The rows are read in order and the ones the page needs are kept, so
+	// the offset is applied once across every catalogue.
+	items := make([]ResultItem, 0, limit)
+	var total int64
+	skipped := 0
+
+	for _, plan := range all {
+		rows, count, err := s.repo.Search(ctx, plan, pagination.Query{
+			Page:     1,
+			PageSize: maxPageSize,
+		})
 		if err != nil {
 			return nil, err
 		}
-		items = append(items, rows...)
 		total += count
+
+		for _, row := range rows {
+			if skipped < offset {
+				skipped++
+				continue
+			}
+			if len(items) >= limit {
+				break
+			}
+			items = append(items, row)
+		}
 	}
 
 	return &SearchResponse{

@@ -42,8 +42,10 @@ type Config struct {
 // GeminiConfig holds the language-model credentials used by the
 // natural-language search endpoint.
 //
-//	GEMINI_API_KEY  the API key (optional)
-//	GEMINI_MODEL    the model to use (default "gemini-3.5-flash-lite")
+//	GEMINI_API_KEY   the API key (optional)
+//	GEMINI_API_KEYS  extra keys tried when the first is exhausted (optional,
+//	                 comma separated)
+//	GEMINI_MODEL     the model to use (default "gemini-3.5-flash-lite")
 //
 // The key is optional on purpose: the app must still boot without a model,
 // and the endpoint reports that it is unavailable rather than taking the
@@ -56,9 +58,15 @@ type Config struct {
 // "flash-lite" is therefore not a safe label to reason with — gemini-2.5-
 // flash-lite is on the short allowance. The default is the model with the
 // generous one.
+//
+// Extra keys are only useful from a different account: the provider's
+// allowance is counted per project, and every key belongs to a project.
 type GeminiConfig struct {
 	APIKey string `env:"API_KEY"`
-	Model  string `env:"MODEL" envDefault:"gemini-3.5-flash-lite"`
+	// APIKeys are tried in order after APIKey. Each must belong to a
+	// different project to have its own allowance.
+	APIKeys []string `env:"API_KEYS" envSeparator:","`
+	Model   string   `env:"MODEL" envDefault:"gemini-3.5-flash-lite"`
 }
 
 type CloudinaryConfig struct {

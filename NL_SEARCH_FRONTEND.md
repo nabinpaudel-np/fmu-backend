@@ -13,6 +13,28 @@ this endpoint.
 - **Auth:** none required. A signed-in session cookie is used, if present, only
   to give the caller their own rate-limit budget.
 
+### Server configuration
+
+The endpoint needs a language model. Without one it reports itself as
+unavailable and the rest of the API keeps working.
+
+| Variable | Required | Notes |
+|---|---|---|
+| `GEMINI_API_KEY` | no | The preferred key. The endpoint is disabled when it and the list below are both empty. |
+| `GEMINI_API_KEYS` | no | Extra keys, comma separated, tried in order when one before them is exhausted. |
+| `GEMINI_MODEL` | no | Defaults to `gemini-3.5-flash-lite`. |
+| `ALLOWED_ORIGINS` | yes | The frontend's origin, so the browser accepts the reply. |
+
+**The extra keys must come from a different account.** The provider counts
+the day's allowance per project, and every key belongs to a project, so a
+second key from the same project shares the first one's quota and adds
+nothing. A key from a different account has its own allowance, and the
+endpoint falls over to it when the first is spent.
+
+When a key is out of allowance the endpoint remembers that and skips it for
+the rest of the day's window rather than paying a failed request on every
+search.
+
 ---
 
 ## 1. Rules for this integration

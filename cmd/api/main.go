@@ -169,12 +169,16 @@ func main() {
 	// still boots, the endpoint reports itself as unavailable, and the
 	// catalogue's own search endpoints keep serving the frontend.
 	var interpreter nlsearch.Interpreter
-	if strings.TrimSpace(cfg.Gemini.APIKey) != "" {
-		gemini, err := nlsearch.NewGeminiInterpreter(context.Background(), cfg.Gemini.APIKey, cfg.Gemini.Model)
+	keys := append([]string{cfg.Gemini.APIKey}, cfg.Gemini.APIKeys...)
+	if len(nlsearch.UsableKeys(keys)) > 0 {
+		gemini, err := nlsearch.NewGeminiInterpreterWithKeys(context.Background(), keys, cfg.Gemini.Model)
 		if err != nil {
 			log.Fatalf("gemini init failed: %v", err)
 		}
 		interpreter = gemini
+		if len(keys) > 1 {
+			log.Printf("nl-search: %d gemini keys configured", len(nlsearch.UsableKeys(keys)))
+		}
 	} else {
 		log.Println("nl-search: GEMINI_API_KEY not set, natural-language search is disabled")
 	}

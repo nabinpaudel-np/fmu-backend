@@ -86,6 +86,10 @@ services:
       # endpoint reports itself as unavailable and the catalogue's own search
       # endpoints keep working.
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      # Extra keys tried when the first is out of allowance. Each must be
+      # from a different account: the provider counts the allowance per
+      # project, so a key from the same project shares the same quota.
+      GEMINI_API_KEYS: ${GEMINI_API_KEYS:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.5-flash-lite}
 
     volumes:

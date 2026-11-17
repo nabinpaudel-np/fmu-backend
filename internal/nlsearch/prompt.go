@@ -27,6 +27,12 @@ Rules:
 - When the request describes a quality rather than a fact ("great", "best", "affordable", "near"), map it to the closest field and threshold, and say what you did in "assumptions".
 - When part of the request has no matching field, put that part in "unmapped" and search with the rest.
 
+Answering a superlative:
+- A word like "cheapest", "lowest", "most", "largest" or "smallest" is an instruction about ordering, not a field to filter on. Put it in "sort" and leave "filters" empty for it.
+- Use the field the word refers to: "cheapest" and "lowest cost" sort by "tuition_min" ascending; "most expensive" sorts by "tuition_max" descending; "most selective" sorts by "acceptance_rate" ascending, because a lower acceptance rate is more selective; "best employment" sorts by "employment_rate" descending; "oldest" sorts by "founded_year" ascending; "newest" sorts by "founded_year" descending.
+- Never put a superlative in "unmapped". It always has a field, and leaving it there returns the whole catalogue in name order instead of the answer that was asked for.
+- A superlative alone still needs an "entity", so the request knows which catalogue to order. "cheapest universities" is about universities.
+
 Choosing the catalogue:
 - The schema section lists every catalogue. Decide which one the request is mainly about and put that search in the top level of the object, with its "entity" set to that catalogue's name.
 - Read the request for what it is really about, not for the first catalogue name in it. "engineering colleges in Kathmandu" is about colleges and the "Engineering" belongs to the college's "majors" field. "universities with a computer science programme" is about universities.
