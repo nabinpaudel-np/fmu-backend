@@ -406,6 +406,20 @@ look like what they do.
 **Results are ranked by relevance** when the question mentions something in
 passing ("universities like Kathmandu University"), otherwise by name.
 
+**The descriptive part of the question is matched against the prose.** A
+question like "universities known for machine learning research" or
+"programmes for becoming a data analyst" is matched against each row's
+description — the university's overview and excerpt, the college's overview
+and excerpt, the programme's description, excerpt and career options. The
+words do not have to appear in a particular column, and a row whose prose
+does not mention them is not returned.
+
+This means the results are not limited to what the structured filters cover.
+A question can match on wording that exists nowhere in the catalogue's
+facets. Questions that mix both — "engineering colleges in Kathmandu with
+strong placement support" — filter on the facts and search the prose, and
+both have to hold.
+
 **The endpoint is slower than a normal search.** It makes one model call before
 it queries the database — the catalogue is chosen by the server itself, and
 the model only turns the question into filters. Expect roughly one to four

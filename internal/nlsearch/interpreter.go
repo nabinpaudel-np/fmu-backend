@@ -342,6 +342,8 @@ func filterSetSchema() *genai.Schema {
 
 	properties := map[string]*genai.Schema{
 		"entity": {Type: genai.TypeString, Enum: allEntityNames()},
+		// The free-text term matched against the catalogue's prose.
+		"search": {Type: genai.TypeString},
 		"filters": {
 			Type:  genai.TypeArray,
 			Items: filterSchema,
@@ -411,6 +413,7 @@ func alsoSchema() *genai.Schema {
 		Type: genai.TypeObject,
 		Properties: map[string]*genai.Schema{
 			"entity": {Type: genai.TypeString, Enum: allEntityNames()},
+			"search": {Type: genai.TypeString},
 			"filters": {
 				Type: genai.TypeArray,
 				Items: &genai.Schema{

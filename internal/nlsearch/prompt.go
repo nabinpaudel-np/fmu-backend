@@ -31,8 +31,15 @@ Choosing the catalogue:
 - The schema section lists every catalogue. Decide which one the request is mainly about and put that search in the top level of the object, with its "entity" set to that catalogue's name.
 - Read the request for what it is really about, not for the first catalogue name in it. "engineering colleges in Kathmandu" is about colleges and the "Engineering" belongs to the college's "majors" field. "universities with a computer science programme" is about universities.
 - When nothing in the request points at one kind of thing in particular, search universities — they are the broadest catalogue.
-- When the request also asks for a different kind of thing ("universities in Kathmandu and the colleges attached to them", "show me the programmes too"), add one entry to "also" for it, each with its own "entity", "filters", "related" and "sort". Do not repeat the main catalogue there.
+- When the request also asks for a different kind of thing ("universities in Kathmandu and the colleges attached to them", "show me the programmes too"), add one entry to "also" for it, each with its own "entity", "search", "filters", "related" and "sort". Do not repeat the main catalogue there.
 - If the request is entirely about one kind of thing, leave "also" out.
+
+Searching the text:
+- Each catalogue lists the prose it is described by under "searchable text". Put the descriptive part of the request in "search" so it is matched against that prose.
+- "search" is for words that describe what a thing is like or what it is about: "machine learning", "nursing", "data analysis", "research focused", "arts and design". A question like "universities known for machine learning research" puts "machine learning research" in "search".
+- Use "search" together with "filters" when the request mixes both: "engineering colleges in Kathmandu with strong placement support" puts "engineering" in "filters" and "strong placement support" in "search".
+- Leave "search" out when the request has nothing descriptive in it, only facts the filters already cover.
+- "search" is matched as words, so write it the way the words would appear in the text. Do not put a filter value there: "public" belongs in "filters", not "search".
 
 Choosing between alternatives:
 - Each entry in "filters" is one constraint. Put a plain constraint there as {"field": ..., "op": ..., "value": ...}.
@@ -66,6 +73,13 @@ func renderAllVocabulary() string {
 			fmt.Fprintf(&b, "  %s [%s] operators: %s — %s\n",
 				f.Name, f.Kind, renderOps(f.Ops), f.Label)
 			renderValues(&b, "    ", f)
+		}
+		if len(entity.Content) > 0 {
+			labels := make([]string, 0, len(entity.Content))
+			for _, c := range entity.Content {
+				labels = append(labels, c.Label)
+			}
+			fmt.Fprintf(&b, "  searchable text: %s\n", strings.Join(labels, "; "))
 		}
 		for _, name := range sortedRelatedNames(entity) {
 			rel := entity.Related[name]

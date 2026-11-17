@@ -47,6 +47,7 @@ type SortDTO struct {
 // shown to the user, never executed.
 type FilterSetDTO struct {
 	Entity      string         `json:"entity"`
+	Search      string         `json:"search,omitempty"`
 	Filters     []ConditionDTO `json:"filters"`
 	Related     []RelatedDTO   `json:"related"`
 	Sort        *SortDTO       `json:"sort"`
@@ -59,6 +60,7 @@ type FilterSetDTO struct {
 // AlsoDTO is one extra search over another catalogue.
 type AlsoDTO struct {
 	Entity      string         `json:"entity"`
+	Search      string         `json:"search,omitempty"`
 	Filters     []ConditionDTO `json:"filters"`
 	Related     []RelatedDTO   `json:"related"`
 	Sort        *SortDTO       `json:"sort"`
@@ -108,6 +110,7 @@ type SortSpec struct {
 // Plan is a validated, normalised filter set ready for the compiler.
 type Plan struct {
 	Entity      *Entity
+	Search      string
 	Filters     []FilterSpec
 	Related     []RelatedSpec
 	Sort        *SortSpec
@@ -171,7 +174,7 @@ func Validate(dto *FilterSetDTO) (*Plans, *ValidationError) {
 		return nil, &ValidationError{Message: "the model returned an empty filter set"}
 	}
 
-	primary, verr := validatePlan(dto.Entity, dto.Filters, dto.Related, dto.Sort, dto.Assumptions, dto.Unmapped)
+	primary, verr := validatePlan(dto.Entity, dto.Search, dto.Filters, dto.Related, dto.Sort, dto.Assumptions, dto.Unmapped)
 	if verr != nil {
 		return nil, verr
 	}
@@ -189,7 +192,7 @@ func Validate(dto *FilterSetDTO) (*Plans, *ValidationError) {
 			continue
 		}
 		other, verr := validatePlan(
-			also.Entity, also.Filters, also.Related, also.Sort,
+			also.Entity, also.Search, also.Filters, also.Related, also.Sort,
 			also.Assumptions, nil,
 		)
 		if verr != nil {
@@ -206,6 +209,7 @@ func Validate(dto *FilterSetDTO) (*Plans, *ValidationError) {
 // they describe.
 func validatePlan(
 	entityName string,
+	search string,
 	filters []ConditionDTO,
 	related []RelatedDTO,
 	sort *SortDTO,
@@ -222,6 +226,7 @@ func validatePlan(
 
 	plan := &Plan{
 		Entity:      entity,
+		Search:      normaliseSearch(entity, search),
 		Assumptions: truncate(strings.TrimSpace(assumptions), maxAssumptionLength),
 		Unmapped:    trimAll(unmapped, maxUnmappedItems),
 	}
@@ -511,6 +516,23 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return string(runes[:max])
+}
+
+// maxSearchLength caps the free-text term.
+const maxSearchLength = 200
+
+// normaliseSearch prepares the model's free-text term. A catalogue with no
+// searchable prose cannot answer one, so the term is dropped rather than
+// matching nothing.
+func normaliseSearch(entity *Entity, search string) string {
+	if len(entity.Content) == 0 {
+		return ""
+	}
+	search = strings.TrimSpace(search)
+	if search == "" {
+		return ""
+	}
+	return truncate(search, maxSearchLength)
 }
 
 func trimAll(items []string, max int) []string {
