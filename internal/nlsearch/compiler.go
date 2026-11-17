@@ -30,10 +30,19 @@ type builder struct {
 	// relevance is the first fuzzy text filter on the returned entity, used
 	// to order results by how well they match.
 	relevance *relevance
+	// rank is the full-text search on the returned entity, used to order
+	// results by how well their prose matches.
+	rank *rank
 }
 
 // relevance is the column and parameter a fuzzy match is scored against.
 type relevance struct {
+	column string
+	param  string
+}
+
+// rank is the vector column and query a full-text search is scored against.
+type rank struct {
 	column string
 	param  string
 }
@@ -53,6 +62,10 @@ func Compile(plan *Plan) *Compiled {
 	clauses := []string{}
 	if status := statusClause(entity); status != "" {
 		clauses = append(clauses, status)
+	}
+
+	if plan.Search != "" {
+		clauses = append(clauses, b.searchClause(entity, plan.Search))
 	}
 
 	for _, f := range plan.Filters {
@@ -85,6 +98,36 @@ func statusClause(entity *Entity) string {
 		return ""
 	}
 	return fmt.Sprintf("%s.%s = 'published'", entity.Alias, entity.StatusColumn)
+}
+
+// searchClause matches the entity's prose against a free-text term. The
+// vector column holds the indexed text, so the match uses the index.
+//
+// The trigram match is kept as a fallback: a term the dictionary does not
+// know, or a word typed in the middle of a phrase, still finds its row.
+func (b *builder) searchClause(entity *Entity, search string) string {
+	if len(entity.Content) == 0 {
+		return "FALSE"
+	}
+
+	vector := entity.Alias + ".search_vector"
+	query := b.bind(search)
+	like := b.bind("%" + escapeLike(search) + "%")
+
+	b.rank = &rank{column: vector, param: query}
+
+	parts := []string{}
+	for _, c := range entity.Content {
+		parts = append(parts, fmt.Sprintf(
+			"(%s ILIKE %s ESCAPE '\\')",
+			entity.Alias+"."+c.Column, like,
+		))
+	}
+
+	return fmt.Sprintf(
+		"(%s @@ websearch_to_tsquery('english', %s) OR %s)",
+		vector, query, strings.Join(parts, " OR "),
+	)
 }
 
 // filterClause renders one validated filter. A group of alternatives becomes
@@ -290,6 +333,10 @@ func orderBy(plan *Plan, b *builder) string {
 		if field, ok := plan.Entity.Field(plan.Sort.Field); ok && field.Column != "" {
 			return fmt.Sprintf("%s %s", field.Column, strings.ToUpper(plan.Sort.Direction))
 		}
+	}
+	if b.rank != nil {
+		return fmt.Sprintf("ts_rank(%s, websearch_to_tsquery('english', %s)) DESC, %s",
+			b.rank.column, b.rank.param, plan.Entity.DefaultOrder)
 	}
 	if b.relevance != nil {
 		return fmt.Sprintf("similarity(%s, %s) DESC, %s", b.relevance.column, b.relevance.param, plan.Entity.DefaultOrder)

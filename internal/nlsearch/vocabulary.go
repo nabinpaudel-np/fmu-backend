@@ -81,6 +81,16 @@ type Entity struct {
 	DefaultOrder string
 	Fields       []Field
 	Related      map[string]*Relation
+
+	// Content names the columns a free-text question is matched against.
+	// The vector column holds the indexed text.
+	Content []ContentField
+}
+
+// ContentField is one column of an entity's searchable prose.
+type ContentField struct {
+	Label  string
+	Column string
 }
 
 // Relation lets a filter on this entity reach into another one: "universities
@@ -443,6 +453,12 @@ var programEntity = &Entity{
 			Values: degreeLevelNames,
 		},
 	},
+	// A programme is described by what it covers and what it leads to.
+	Content: []ContentField{
+		{Label: "what the programme covers", Column: "description"},
+		{Label: "the short summary of the programme", Column: "excerpt"},
+		{Label: "the careers the programme leads to", Column: "career_options"},
+	},
 }
 
 var universityEntity = &Entity{
@@ -718,6 +734,11 @@ var universityEntity = &Entity{
 			Values: athleticNames,
 		},
 	},
+	// A university is described by its overview and short summary.
+	Content: []ContentField{
+		{Label: "the description of the university", Column: "overview"},
+		{Label: "the short summary of the university", Column: "excerpt"},
+	},
 }
 
 var collegeEntity = &Entity{
@@ -858,6 +879,11 @@ var collegeEntity = &Entity{
 			},
 			Values: studyFormatNames,
 		},
+	},
+	// A college is described by its overview and short summary.
+	Content: []ContentField{
+		{Label: "the description of the college", Column: "overview"},
+		{Label: "the short summary of the college", Column: "excerpt"},
 	},
 }
 

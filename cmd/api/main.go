@@ -22,6 +22,7 @@ import (
 	"fmu-backend/internal/db"
 	"fmu-backend/internal/db/sqlc"
 	"fmu-backend/internal/favorites"
+	"fmu-backend/internal/health"
 	"fmu-backend/internal/mail"
 	"fmu-backend/internal/nlsearch"
 	"fmu-backend/internal/oauth"
@@ -169,15 +170,27 @@ func main() {
 	// still boots, the endpoint reports itself as unavailable, and the
 	// catalogue's own search endpoints keep serving the frontend.
 	var interpreter nlsearch.Interpreter
-	if strings.TrimSpace(cfg.Gemini.APIKey) != "" {
-		gemini, err := nlsearch.NewGeminiInterpreter(context.Background(), cfg.Gemini.APIKey, cfg.Gemini.Model)
+	// Either variable on its own is enough. When both are set the single
+	// key leads and the list follows, so an existing deployment keeps the
+	// key it already had.
+	keys := nlsearch.UsableKeys(append([]string{cfg.Gemini.APIKey}, cfg.Gemini.APIKeys...))
+	if len(keys) > 0 {
+		gemini, err := nlsearch.NewGeminiInterpreterWithKeys(context.Background(), keys, cfg.Gemini.Model)
 		if err != nil {
 			log.Fatalf("gemini init failed: %v", err)
 		}
 		interpreter = gemini
+		log.Printf("nl-search: %d gemini key(s) configured", len(keys))
 	} else {
-		log.Println("nl-search: GEMINI_API_KEY not set, natural-language search is disabled")
+		log.Println("nl-search: no gemini key set, natural-language search is disabled")
 	}
+	// The health endpoint reports the state of the model, so it needs the
+	// interpreter. It is nil when no key is configured.
+	var aiReporter health.AIStatus
+	if gemini, ok := interpreter.(*nlsearch.GeminiInterpreter); ok {
+		aiReporter = gemini
+	}
+
 	nlRepo := nlsearch.NewRepository(pool)
 	nlSvc := nlsearch.NewService(interpreter, nlRepo)
 	nlHandler := nlsearch.NewHandler(nlSvc)
@@ -209,6 +222,10 @@ func main() {
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
+
+	// Registered before the others so a platform probe never waits behind
+	// the rate limiter or anything else.
+	health.RegisterRoutes(r, health.NewHandler(pool, aiReporter))
 
 	auth.RegisterRoutes(r, authHandler, authMW)
 	university.RegisterRoutes(r, universityHandler, authMW, adminMW, optionalAuthMW)
