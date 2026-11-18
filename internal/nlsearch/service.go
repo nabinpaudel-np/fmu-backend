@@ -86,6 +86,10 @@ func (s *service) Search(ctx context.Context, req SearchRequest) (*SearchRespons
 		}
 	}
 
+	// A request that names a quality is answered as a filter as well as an
+	// ordering, whether or not the model remembered to add the filter.
+	applyQualities(plans, query)
+
 	s.cache.Put(cacheKey, plans)
 
 	sortLabel := "none"
@@ -97,6 +101,18 @@ func (s *service) Search(ctx context.Context, req SearchRequest) (*SearchRespons
 		len(plans.Primary.Related), len(plans.All()))
 
 	return s.run(ctx, req, query, plans, plans.Primary.Assumptions)
+}
+
+// applyQualities applies the quality a request names to every plan it spans.
+// A question can be about more than one catalogue, and a quality only applies
+// to the catalogues that have the field it refers to.
+func applyQualities(plans *Plans, question string) {
+	if plans == nil {
+		return
+	}
+	for _, plan := range plans.All() {
+		ApplyQuality(plan, question)
+	}
 }
 
 // run executes the plans against the catalogue and shapes the answer.

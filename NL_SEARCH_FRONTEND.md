@@ -418,6 +418,19 @@ city centre" are qualities, not fields. The backend maps them to the closest
 field and threshold and tells you what it did in `interpretation.assumptions`.
 That's the intended behaviour — show the assumption rather than hiding it.
 
+A quality is a **filter**, not just an ordering. "Affordable universities"
+returns the universities that are affordable, with the cheapest first — it does
+not return every university ordered by price. The thresholds the backend uses
+are: affordable / cheap / budget / inexpensive / low cost → tuition at or below
+20000; expensive → tuition at or above 40000; selective → acceptance rate under
+30; prestigious → acceptance rate under 20; old / established → founded before
+1950. If a question states its own number ("universities under 10000"), that
+number is used instead of the default.
+
+An ordering word on its own — "cheapest", "least expensive" — is **not** a
+quality. It returns the whole catalogue ordered by that field, with the extreme
+first. "Cheapest universities" is a sort; "affordable universities" is a filter.
+
 **Part of the question may not be searchable.** Anything with no matching
 field is listed in `interpretation.unmapped` and the rest of the question is
 still searched.

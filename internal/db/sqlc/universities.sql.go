@@ -1086,23 +1086,26 @@ SELECT
     COALESCE(logo, '') AS logo
 FROM universities
 WHERE status = 'published'
-  AND (similarity(name, $1) > 0.2
-   OR similarity(full_location, $1) > 0.2
-   OR similarity(city, $1) > 0.2
-   OR similarity(state, $1) > 0.2
-   OR similarity(country, $1) > 0.2
-   OR similarity(continent, $1) > 0.2)
+  AND (word_similarity(name, $1) > 0.2
+   OR word_similarity(full_location, $1) > 0.2
+   OR word_similarity(city, $1) > 0.2
+   OR word_similarity(state, $1) > 0.2
+   OR word_similarity(country, $1) > 0.2
+   OR lower(COALESCE(continent, '')) = ANY($3::text[])
+   OR lower(COALESCE(country, '')) = ANY($4::text[]))
 ORDER BY GREATEST(
-    similarity(name, $1),
-    similarity(full_location, $1),
-    similarity(city, $1)
+    word_similarity(name, $1),
+    word_similarity(full_location, $1),
+    word_similarity(city, $1)
 ) DESC, name ASC
 LIMIT $2
 `
 
 type SearchUniversitiesParams struct {
-	Similarity string
-	Limit      int32
+	WordSimilarity string
+	Limit          int32
+	ContinentNames []string
+	CountryAliases []string
 }
 
 type SearchUniversitiesRow struct {
@@ -1117,13 +1120,13 @@ type SearchUniversitiesRow struct {
 	Logo         string
 }
 
-// Typo-tolerant search across name + location fields via pg_trgm similarity.
-// Threshold 0.2 is below the PG default of 0.3, so "cambrige" still matches
-// "Cambridge". Results are ranked by max similarity across the matched fields.
-// COALESCE keeps nullable location/URL columns as plain strings in the row type
-// (the API response does not carry nulls).
 func (q *Queries) SearchUniversities(ctx context.Context, arg SearchUniversitiesParams) ([]SearchUniversitiesRow, error) {
-	rows, err := q.db.Query(ctx, searchUniversities, arg.Similarity, arg.Limit)
+	rows, err := q.db.Query(ctx, searchUniversities,
+		arg.WordSimilarity,
+		arg.Limit,
+		arg.ContinentNames,
+		arg.CountryAliases,
+	)
 	if err != nil {
 		return nil, err
 	}

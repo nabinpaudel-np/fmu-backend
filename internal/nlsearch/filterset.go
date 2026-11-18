@@ -272,6 +272,60 @@ func validatePlan(
 	return plan, nil
 }
 
+// ApplyQuality makes sure a request that names a quality is answered as a
+// filter, not only as an ordering.
+//
+// The model is told about the qualities and their thresholds, and it usually
+// does the right thing. This is the backstop for when it does not: "affordable
+// universities" means a set of affordable universities, and a plan that only
+// sorts by tuition returns every university with the cheapest first, which
+// reads as "no results" to anyone who wanted a shortlist.
+//
+// The filter is only added when the plan does not already constrain the same
+// field, so a plan that reads "universities under 10000" keeps its own number
+// rather than being overwritten by the default threshold.
+func ApplyQuality(plan *Plan, question string) {
+	if plan == nil {
+		return
+	}
+	quality, ok := MatchQuality(plan.Entity, question)
+	if !ok {
+		return
+	}
+	if planAlreadyFilters(plan, quality.Field) {
+		return
+	}
+	plan.Filters = append(plan.Filters, FilterSpec{
+		Field: quality.Field,
+		Op:    quality.Op,
+		Value: Value{Kind: ValueNumber, Num: quality.Value},
+	})
+	if plan.Sort == nil && quality.Sort {
+		plan.Sort = &SortSpec{Field: quality.Field, Direction: sortDirection(quality)}
+	}
+	if plan.Assumptions == "" {
+		plan.Assumptions = quality.Rationale
+	} else {
+		plan.Assumptions = truncate(plan.Assumptions+" — "+quality.Rationale, maxAssumptionLength)
+	}
+}
+
+// planAlreadyFilters reports whether the plan already constrains a field, at
+// the top level or inside a group of alternatives.
+func planAlreadyFilters(plan *Plan, field string) bool {
+	for _, f := range plan.Filters {
+		if f.Field == field {
+			return true
+		}
+		for _, alt := range f.Any {
+			if alt.Field == field {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // validateCondition checks one constraint against a field definition.
 func validateCondition(entity *Entity, c ConditionDTO) (FilterSpec, *ValidationError) {
 	hasFilter := c.Field != ""

@@ -161,11 +161,6 @@ SELECT id, name FROM athletics ORDER BY name;
 SELECT id, name FROM support_services ORDER BY name;
 
 -- name: SearchUniversities :many
--- Typo-tolerant search across name + location fields via pg_trgm similarity.
--- Threshold 0.2 is below the PG default of 0.3, so "cambrige" still matches
--- "Cambridge". Results are ranked by max similarity across the matched fields.
--- COALESCE keeps nullable location/URL columns as plain strings in the row type
--- (the API response does not carry nulls).
 SELECT
     id,
     name,
@@ -178,16 +173,17 @@ SELECT
     COALESCE(logo, '') AS logo
 FROM universities
 WHERE status = 'published'
-  AND (similarity(name, $1) > 0.2
-   OR similarity(full_location, $1) > 0.2
-   OR similarity(city, $1) > 0.2
-   OR similarity(state, $1) > 0.2
-   OR similarity(country, $1) > 0.2
-   OR similarity(continent, $1) > 0.2)
+  AND (word_similarity(name, $1) > 0.2
+   OR word_similarity(full_location, $1) > 0.2
+   OR word_similarity(city, $1) > 0.2
+   OR word_similarity(state, $1) > 0.2
+   OR word_similarity(country, $1) > 0.2
+   OR lower(COALESCE(continent, '')) = ANY(sqlc.arg(continent_names)::text[])
+   OR lower(COALESCE(country, '')) = ANY(sqlc.arg(country_aliases)::text[]))
 ORDER BY GREATEST(
-    similarity(name, $1),
-    similarity(full_location, $1),
-    similarity(city, $1)
+    word_similarity(name, $1),
+    word_similarity(full_location, $1),
+    word_similarity(city, $1)
 ) DESC, name ASC
 LIMIT $2;
 

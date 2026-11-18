@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"fmu-backend/internal/countryalias"
 	"fmu-backend/internal/db/sqlc"
 	"fmu-backend/internal/errs"
 	"fmu-backend/internal/pagination"
@@ -79,8 +80,10 @@ func NewUniversityRepository(queries *sqlc.Queries, pool *pgxpool.Pool) Universi
 
 func (r *universityRepository) Search(ctx context.Context, q string) ([]sqlc.SearchUniversitiesRow, error) {
 	return r.queries.SearchUniversities(ctx, sqlc.SearchUniversitiesParams{
-		Similarity: q,
-		Limit:      int32(maxSearchResults),
+		WordSimilarity: q,
+		Limit:          int32(maxSearchResults),
+		ContinentNames: countryalias.MatchContinent(q),
+		CountryAliases: countryalias.MatchCountryNames(q),
 	})
 }
 

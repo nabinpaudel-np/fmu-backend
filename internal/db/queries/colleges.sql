@@ -143,20 +143,21 @@ SELECT
 FROM colleges c
 LEFT JOIN universities u ON u.id = c.university_id
 WHERE c.status = 'published'
-  AND (similarity(c.name, $1) > 0.2
-   OR similarity(c.full_location, $1) > 0.2
-   OR similarity(c.city, $1) > 0.2
-   OR similarity(c.state, $1) > 0.2
-   OR similarity(c.country, $1) > 0.2
-   OR similarity(c.continent, $1) > 0.2
-   OR similarity(u.name, $1) > 0.2
-   OR similarity(u.slug, $1) > 0.2)
+  AND (word_similarity(c.name, $1) > 0.2
+   OR word_similarity(c.full_location, $1) > 0.2
+   OR word_similarity(c.city, $1) > 0.2
+   OR word_similarity(c.state, $1) > 0.2
+   OR word_similarity(c.country, $1) > 0.2
+   OR word_similarity(u.name, $1) > 0.2
+   OR word_similarity(u.slug, $1) > 0.2
+   OR lower(COALESCE(c.continent, '')) = ANY(sqlc.arg(continent_names)::text[])
+   OR lower(COALESCE(c.country, '')) = ANY(sqlc.arg(country_aliases)::text[]))
 ORDER BY GREATEST(
-    similarity(c.name, $1),
-    similarity(c.full_location, $1),
-    similarity(c.city, $1),
-    similarity(u.name, $1),
-    similarity(u.slug, $1)
+    word_similarity(c.name, $1),
+    word_similarity(c.full_location, $1),
+    word_similarity(c.city, $1),
+    word_similarity(u.name, $1),
+    word_similarity(u.slug, $1)
 ) DESC, c.name ASC
 LIMIT $2;
 

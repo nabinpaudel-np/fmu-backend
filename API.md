@@ -911,7 +911,7 @@ curl 'http://localhost:3000/api/v1/universities?institution_type=private-nonprof
 
 ### GET `/api/v1/universities/search`
 
-Typo-tolerant search across `name`, `city`, `state`, `country`, and `full_location`. Backed by Postgres `pg_trgm` similarity + GIN trigram indexes; results are ranked by similarity score and capped at 50.
+Typo-tolerant search across `name`, `city`, `state`, `country`, and `full_location`. Backed by Postgres `pg_trgm` word-level similarity + GIN trigram indexes; results are ranked by similarity score and capped at 50.
 
 **Auth:** public
 
@@ -957,9 +957,26 @@ GET /api/v1/universities/search?q=cambrige
   → returns "Cambridge University" and other near-spelling matches
 GET /api/v1/universities/search?q=mit
   → returns MIT, Midwestern Institute of Technology, universities with "MA" in location
+GET /api/v1/universities/search?q=universite
+  → returns every university whose name contains "University" — including
+    long names such as "Massachusetts Institute of Technology"
+GET /api/v1/universities/search?q=US
+GET /api/v1/universities/search?q=USA
+GET /api/v1/universities/search?q=United%20States%20of%20America
+  → all three return the same set of US universities
 ```
 
-> The same substring hits the GIN trigram index — no full table scans. Threshold is `similarity(...) > 0.2`, tunable in `internal/db/queries/universities.sql`.
+> **How matching works.** The search compares the query against the best-matching
+> *word* of each field (`word_similarity`), not against the whole string, so a
+> query like "universite" still matches "Massachusetts Institute of Technology"
+> on its "University" token. Threshold is `> 0.2`, tunable in
+> `internal/db/queries/universities.sql`.
+>
+> A country or continent named by the query is expanded into every spelling of
+> that place before it is compared, so `US`, `USA`, `America` and
+> `United States of America` all match a row whose `country` holds
+> `United States of america`. See `internal/countryalias`.
+
 
 ### GET `/api/v1/universities/stats`
 
@@ -1939,7 +1956,7 @@ Results are ordered by `name` ascending. College list items do **not** embed the
 
 ### GET `/api/v1/colleges/search`
 
-Typo-tolerant search across college **and parent university** fields. Backed by Postgres `pg_trgm` similarity + a GIN trigram index on `colleges.name`; results are ranked by similarity score and capped at 50.
+Typo-tolerant search across college **and parent university** fields. Backed by Postgres `pg_trgm` word-level similarity + a GIN trigram index on `colleges.name`; results are ranked by similarity score and capped at 50.
 
 **Fields the query matches against** (similarity threshold `0.2` each):
 
@@ -1953,7 +1970,11 @@ Typo-tolerant search across college **and parent university** fields. Backed by 
 | `universities.name`  *(parent)*| university                      |
 | `universities.slug`  *(parent)*| university                      |
 
+`colleges.continent` is matched exactly rather than fuzzily, for the same reason as on the university endpoint.
+
 The endpoint joins to the parent university, so a single `q` finds both "College of Engineering at MIT" and "All colleges under Harvard". Results are ranked by `GREATEST(...)` of similarity across the fields, with `name` as the stable tiebreaker.
+
+> Matching works exactly as on `GET /api/v1/universities/search`: the query is compared against the best-matching *word* of each field, and a country or continent named by the query is expanded into every spelling of that place before it is compared. See `internal/countryalias`.
 
 **Auth:** public
 
