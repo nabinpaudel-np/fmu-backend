@@ -168,6 +168,12 @@ func (b *builder) filterClause(entity *Entity, f FilterSpec) string {
 			if len(field.CommonValues) > 0 {
 				return b.looseClause(column, f)
 			}
+			// A country or state arrives as a set of every spelling of that
+			// place, because the catalogue stores the full name and the
+			// question may name it by its code.
+			if f.Value.Kind == ValueList {
+				return fmt.Sprintf("%s = ANY(%s::text[])", lower(column), b.bind(lowerAll(stringList(f))))
+			}
 			return fmt.Sprintf("%s = %s", lower(column), b.bind(strings.ToLower(f.Value.Str)))
 		}
 
@@ -178,6 +184,9 @@ func (b *builder) filterClause(entity *Entity, f FilterSpec) string {
 		case KindNumber:
 			return fmt.Sprintf("%s IS DISTINCT FROM %s", column, b.bind(f.Value.Num))
 		default:
+			if f.Value.Kind == ValueList {
+				return fmt.Sprintf("%s IS DISTINCT FROM ALL(%s::text[])", lower(column), b.bind(lowerAll(stringList(f))))
+			}
 			return fmt.Sprintf("%s IS DISTINCT FROM %s", lower(column), b.bind(strings.ToLower(f.Value.Str)))
 		}
 

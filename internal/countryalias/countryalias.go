@@ -367,14 +367,21 @@ func StateCode(value string) string {
 }
 
 func CountryAliases(code string) []string {
+	return aliasesFor(countryCodes, code)
+}
+
+// aliasesFor collects every spelling of a place that maps to the given code.
+// Spellings that differ only in case are the same spelling once the column
+// is compared case-insensitively, so only one of each is kept.
+func aliasesFor(codes map[string]string, code string) []string {
 	code = strings.ToUpper(strings.TrimSpace(code))
 	if code == "" {
 		return nil
 	}
-	set := map[string]struct{}{code: {}}
-	for alias, c := range countryCodes {
+	set := map[string]struct{}{strings.ToLower(code): {}}
+	for alias, c := range codes {
 		if c == code {
-			set[alias] = struct{}{}
+			set[strings.ToLower(alias)] = struct{}{}
 		}
 	}
 	out := make([]string, 0, len(set))
@@ -383,6 +390,25 @@ func CountryAliases(code string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// StateAliases returns every spelling that resolves to the given US state
+// code — the full name and the two-letter code. The catalogue stores a state
+// as a full name, so a filter written against the code has to be widened the
+// same way a country filter is.
+func StateAliases(code string) []string {
+	return aliasesFor(stateCodes, code)
+}
+
+// Aliases returns every spelling that resolves to the given country or state
+// code, whichever kind of place it is.
+func Aliases(kind string, code string) []string {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "state", "province", "region":
+		return StateAliases(code)
+	default:
+		return CountryAliases(code)
+	}
 }
 
 var continentCodes = map[string]string{

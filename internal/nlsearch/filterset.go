@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"fmu-backend/internal/countryalias"
 )
 
 // The model speaks in two layers: a JSON DTO it produces, and a validated
@@ -491,7 +493,7 @@ func normaliseValue(field Field, op Op, raw any) (Value, *ValidationError) {
 					return Value{}, invalid("expected a list of strings")
 				}
 				if s = strings.TrimSpace(s); s != "" {
-					out = append(out, translateCode(field.Code, s))
+					out = append(out, translateCode(field.Code, s)...)
 				}
 			}
 			if len(out) == 0 {
@@ -502,7 +504,11 @@ func normaliseValue(field Field, op Op, raw any) (Value, *ValidationError) {
 		switch v := raw.(type) {
 		case string:
 			if v = strings.TrimSpace(v); v != "" {
-				return Value{Kind: ValueString, Str: translateCode(field.Code, v)}, nil
+				aliases := translateCode(field.Code, v)
+				if len(aliases) == 1 {
+					return Value{Kind: ValueString, Str: aliases[0]}, nil
+				}
+				return Value{Kind: ValueList, List: aliases}, nil
 			}
 		case float64:
 			// Numbers are legitimate values for text columns ("founded in 1998").
@@ -514,16 +520,24 @@ func normaliseValue(field Field, op Op, raw any) (Value, *ValidationError) {
 	return Value{}, invalid("unsupported field type")
 }
 
-// translateCode turns a country or state name into the code the column
-// holds. A question says "the United States" where the catalogue says "US".
-func translateCode(code Code, value string) string {
+// translateCode widens a country or state name into every spelling of that
+// place.
+//
+// The catalogue stores a country as a full name ("United States of america")
+// and a state as its full name too, but a question names them in words or by
+// their code. Comparing the stored full name against the code matches
+// nothing, so the value is widened into every spelling that means the same
+// place and the compiler matches against the set.
+//
+// A field that is not a country or a state keeps the value it was given.
+func translateCode(code Code, value string) []string {
 	switch code {
 	case CodeCountry:
-		return countryCode(value)
+		return countryalias.CountryAliases(countryCode(value))
 	case CodeState:
-		return stateCode(value)
+		return countryalias.StateAliases(stateCode(value))
 	}
-	return value
+	return []string{value}
 }
 
 // checkClosedVocabulary enforces a field's fixed value list.

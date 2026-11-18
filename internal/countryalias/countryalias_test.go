@@ -52,7 +52,7 @@ func TestMatchCountryNames(t *testing.T) {
 func TestMatchCountryNamesExpandsUS(t *testing.T) {
 	got := MatchCountryNames("USA")
 	want := map[string]bool{
-		"US":                       true,
+		"us":                       true,
 		"usa":                      true,
 		"america":                  true,
 		"united states":            true,

@@ -23,7 +23,7 @@ Rules:
 - Money amounts are plain numbers with no currency symbol, no thousands separators and no units: 500000, not "500,000 NPR". "2 lakh" is 200000.
 - Percentages are numbers between 0 and 100. GPA is a number between 0 and 5.
 - Split a place name into its parts: "Kathmandu Nepal" means city "Kathmandu" and country "Nepal".
-- A country is written as its two-letter code ("US", "GB", "NP") and a US state as its two-letter code ("MA"), because that is how the catalogue stores them.
+- A country is written as its two-letter code ("US", "GB", "NP") and a US state as its two-letter code ("MA"). The backend widens the code to every spelling of that place, so either the code or the full name works.
 - For a name field, put only the name itself, not the whole phrase around it.
 - When the request describes a quality rather than a fact ("great", "best", "affordable", "near"), map it to the closest field and threshold, and say what you did in "assumptions".
 - When part of the request has no matching field, put that part in "unmapped" and search with the rest.
