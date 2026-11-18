@@ -24,8 +24,11 @@ func TestMatchQuality_Affordable(t *testing.T) {
 			t.Errorf("MatchQuality(%q) found no quality", q)
 			continue
 		}
-		if got.Field != "tuition_max" || got.Op != OpLte || got.Value != 20000 {
-			t.Errorf("MatchQuality(%q) = %+v, want tuition_max <= 20000", q, got)
+		if got.Field != "tuition_max" || !got.Sort || !got.Ascending {
+			t.Errorf("MatchQuality(%q) = %+v, want a tuition ranking, cheapest first", q, got)
+		}
+		if got.Threshold {
+			t.Errorf("MatchQuality(%q) has a threshold, want a ranking only", q)
 		}
 	}
 }
@@ -51,21 +54,42 @@ func TestMatchQuality_NotOfferedWithoutTheField(t *testing.T) {
 	}
 }
 
-func TestApplyQuality_AddsTheFilter(t *testing.T) {
+// A money quality ranks rather than filters. Tuition here runs from 0 to
+// 9,000,000 across currencies, so a cut-off would drop every university
+// whose fees sit above it — which is most of them.
+func TestApplyQuality_AffordableOnlyRanks(t *testing.T) {
 	entity, _ := entityByName("universities")
 	plan := &Plan{Entity: entity}
 
 	ApplyQuality(plan, "affordable universities")
 
+	if len(plan.Filters) != 0 {
+		t.Errorf("plan has %d filters, want none for a ranking quality", len(plan.Filters))
+	}
+	if plan.Sort == nil {
+		t.Fatal("plan has no sort, want one ordered by tuition")
+	}
+	if plan.Sort.Field != "tuition_max" || plan.Sort.Direction != "ascending" {
+		t.Errorf("sort = %+v, want tuition_max ascending", plan.Sort)
+	}
+}
+
+// A quality with a natural line filters as well as ranks.
+func TestApplyQuality_SelectiveFiltersAndRanks(t *testing.T) {
+	entity, _ := entityByName("universities")
+	plan := &Plan{Entity: entity}
+
+	ApplyQuality(plan, "selective universities")
+
 	if len(plan.Filters) != 1 {
 		t.Fatalf("plan has %d filters, want 1", len(plan.Filters))
 	}
 	f := plan.Filters[0]
-	if f.Field != "tuition_max" || f.Op != OpLte || f.Value.Num != 20000 {
-		t.Errorf("filter = %+v, want tuition_max <= 20000", f)
+	if f.Field != "acceptance_rate" || f.Op != OpLt || f.Value.Num != 30 {
+		t.Errorf("filter = %+v, want acceptance_rate < 30", f)
 	}
 	if plan.Sort == nil {
-		t.Error("plan has no sort, want one ordered by tuition")
+		t.Error("plan has no sort, want one ordered by acceptance rate")
 	}
 }
 
@@ -88,6 +112,21 @@ func TestApplyQuality_KeepsAnExplicitNumber(t *testing.T) {
 	}
 }
 
+// "expensive" is the mirror of "affordable": most expensive first.
+func TestApplyQuality_ExpensiveSortsDescending(t *testing.T) {
+	entity, _ := entityByName("universities")
+	plan := &Plan{Entity: entity}
+
+	ApplyQuality(plan, "expensive universities")
+
+	if plan.Sort == nil {
+		t.Fatal("plan has no sort")
+	}
+	if plan.Sort.Field != "tuition_min" || plan.Sort.Direction != "descending" {
+		t.Errorf("sort = %+v, want tuition_min descending", plan.Sort)
+	}
+}
+
 func TestApplyQuality_AddsNothingForASuperlative(t *testing.T) {
 	entity, _ := entityByName("universities")
 	plan := &Plan{Entity: entity}
@@ -107,7 +146,10 @@ func TestRenderQualities_ShowsTheThreshold(t *testing.T) {
 	if got == "" {
 		t.Fatal("no qualities rendered")
 	}
-	if !strings.Contains(got, "affordable") || !strings.Contains(got, "tuition_max") || !strings.Contains(got, "20000") {
-		t.Errorf("rendered qualities missing the threshold: %q", got)
+	if !strings.Contains(got, "affordable") || !strings.Contains(got, "tuition_max") {
+		t.Errorf("rendered qualities missing the tuition ranking: %q", got)
+	}
+	if !strings.Contains(got, "selective") || !strings.Contains(got, "acceptance_rate < 30") {
+		t.Errorf("rendered qualities missing the selective threshold: %q", got)
 	}
 }

@@ -294,14 +294,19 @@ func ApplyQuality(plan *Plan, question string) {
 	if !ok {
 		return
 	}
-	if planAlreadyFilters(plan, quality.Field) {
-		return
+	// A quality with a threshold filters as well as ranks: a university that
+	// accepts 60 percent of applicants is not selective.
+	if quality.Threshold && !planAlreadyFilters(plan, quality.Field) {
+		plan.Filters = append(plan.Filters, FilterSpec{
+			Field: quality.Field,
+			Op:    quality.Op,
+			Value: Value{Kind: ValueNumber, Num: quality.Value},
+		})
 	}
-	plan.Filters = append(plan.Filters, FilterSpec{
-		Field: quality.Field,
-		Op:    quality.Op,
-		Value: Value{Kind: ValueNumber, Num: quality.Value},
-	})
+	// A quality without one only ranks. "Affordable" is a way of asking for
+	// the cheap ones, and a fixed cut-off would return nothing whenever the
+	// data sits above it — which is most of the time, because tuition here
+	// runs from 0 to 9,000,000 across currencies.
 	if plan.Sort == nil && quality.Sort {
 		plan.Sort = &SortSpec{Field: quality.Field, Direction: sortDirection(quality)}
 	}

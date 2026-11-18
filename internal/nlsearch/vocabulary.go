@@ -74,15 +74,23 @@ type Field struct {
 // derive a threshold from the word alone, so each quality carries the
 // threshold to use, and the prompt renders them for the model.
 //
-// A quality always filters. It also sorts, so the best match comes first —
-// "affordable universities" is a filter that happens to be ordered, where
-// "cheapest university" is only an order.
+// A quality ranks by default. "Affordable universities" means the affordable
+// ones, ordered cheapest first — not a cut-off that silently returns nothing
+// when the data does not fit under it. The tuition in this catalogue runs
+// from 0 to 9,000,000 across currencies, so a fixed cut-off would drop every
+// US university.
+//
+// A quality that names a number is different: "selective" means an
+// acceptance rate under a threshold, and a row outside it is not selective.
+// Those set Threshold, and they filter as well as rank.
 type Quality struct {
 	Word      string
 	Field     string
 	Op        Op
 	Value     float64
 	Sort      bool
+	Threshold bool
+	Ascending bool
 	Rationale string
 }
 
@@ -236,92 +244,104 @@ var demographicNames = []string{
 
 // Qualities are the judgements a request makes instead of stating a number:
 // "affordable", "selective", "old". The model cannot work out a threshold
-// from the word on its own, so each one carries the threshold to use. Without
-// this the model sorts by tuition and returns the whole catalogue, because
-// "affordable" names no value it could filter on.
+// from the word on its own, so each one carries how it should be read.
 //
-// The thresholds are in the units the columns hold. Tuition is in the local
-// currency of the row's country, so a single number is only exact for one
-// country — which is why the money thresholds are generous.
+// The money qualities rank rather than filter. Tuition in this catalogue runs
+// from 0 to 9,000,000 and is in the local currency of each row's country, so
+// a fixed cut-off would be meaningless — it would return nothing for a
+// country whose fees are all above it. "Affordable universities" therefore
+// means the universities ordered cheapest first, and the reader can see the
+// prices.
+//
+// The qualities that do have a natural line — a selective school, an old
+// one — set a threshold, and a row outside it is not that thing at all.
 var qualities = []Quality{
 	{
 		Word:      "affordable",
 		Field:     "tuition_max",
 		Op:        OpLte,
-		Value:     20000,
 		Sort:      true,
-		Rationale: "a university is affordable when the most it charges is at or below 20000",
+		Ascending: true,
+		Rationale: "ordered by tuition, cheapest first",
 	},
 	{
 		Word:      "cheap",
 		Field:     "tuition_max",
 		Op:        OpLte,
-		Value:     20000,
 		Sort:      true,
-		Rationale: "a university is cheap when the most it charges is at or below 20000",
+		Ascending: true,
+		Rationale: "ordered by tuition, cheapest first",
 	},
 	{
 		Word:      "budget",
 		Field:     "tuition_max",
 		Op:        OpLte,
-		Value:     20000,
 		Sort:      true,
-		Rationale: "a university is budget when the most it charges is at or below 20000",
+		Ascending: true,
+		Rationale: "ordered by tuition, cheapest first",
 	},
 	{
 		Word:      "inexpensive",
 		Field:     "tuition_max",
 		Op:        OpLte,
-		Value:     20000,
 		Sort:      true,
-		Rationale: "a university is inexpensive when the most it charges is at or below 20000",
+		Ascending: true,
+		Rationale: "ordered by tuition, cheapest first",
 	},
 	{
 		Word:      "low cost",
 		Field:     "tuition_max",
 		Op:        OpLte,
-		Value:     20000,
 		Sort:      true,
-		Rationale: "a university is low cost when the most it charges is at or below 20000",
+		Ascending: true,
+		Rationale: "ordered by tuition, cheapest first",
 	},
 	{
 		Word:      "expensive",
 		Field:     "tuition_min",
 		Op:        OpGte,
-		Value:     40000,
 		Sort:      true,
-		Rationale: "a university is expensive when the least it charges is 40000 or more",
+		Ascending: false,
+		Rationale: "ordered by tuition, most expensive first",
 	},
 	{
 		Word:      "selective",
 		Field:     "acceptance_rate",
 		Op:        OpLt,
+		Ascending: true,
 		Value:     30,
 		Sort:      true,
+		Threshold: true,
 		Rationale: "a university is selective when it accepts fewer than 30 percent of applicants",
 	},
 	{
 		Word:      "prestigious",
 		Field:     "acceptance_rate",
 		Op:        OpLt,
+		Ascending: true,
 		Value:     20,
 		Sort:      true,
+		Threshold: true,
 		Rationale: "a university is prestigious when it accepts fewer than 20 percent of applicants",
 	},
 	{
 		Word:      "old",
 		Field:     "founded_year",
 		Op:        OpLt,
+		Ascending: true,
 		Value:     1950,
 		Sort:      true,
+		Threshold: true,
 		Rationale: "a university is old when it was founded before 1950",
 	},
 	{
 		Word:      "established",
 		Field:     "founded_year",
 		Op:        OpLt,
+		Ascending: true,
 		Value:     1950,
 		Sort:      true,
+		Threshold: true,
 		Rationale: "a university is established when it was founded before 1950",
 	},
 }

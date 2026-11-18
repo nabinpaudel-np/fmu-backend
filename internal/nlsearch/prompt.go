@@ -29,10 +29,11 @@ Rules:
 - When part of the request has no matching field, put that part in "unmapped" and search with the rest.
 
 Answering a quality:
-- A quality is a judgement about a field, not a fact about it. It always goes in "filters" as a comparison against a threshold, and it also goes in "sort" so the closest match comes first.
-- The schema section lists the known qualities and the threshold each one means. Use the field, operator and number given there. Do not invent a threshold of your own.
-- "affordable universities" is a filter on tuition, not just an ordering. Filtering is what makes the answer a set of affordable universities; sorting alone returns the whole catalogue with the cheapest first.
-- Say in "assumptions" which quality you turned into which threshold, so the answer can be checked.
+- A quality is a judgement about a field, not a fact about it. The schema section lists the known qualities and how each one is read.
+- A quality that names a threshold goes in "filters" as that comparison, and also in "sort".
+- A quality that only ranks goes in "sort" and leaves "filters" empty. "affordable universities" is ordered by tuition with the cheapest first; it does not exclude anything, because a cut-off would drop every university whose fees sit above it.
+- Use the field and number given in the schema section. Do not invent a threshold of your own.
+- Say in "assumptions" which quality you applied, so the answer can be checked.
 
 Answering a superlative:
 - A word like "cheapest", "lowest", "most", "largest" or "smallest" is an instruction about ordering, not a field to filter on. Put it in "sort" and leave "filters" empty for it.
@@ -108,30 +109,33 @@ func renderAllVocabulary() string {
 	return b.String()
 }
 
-// renderQualities describes the qualities that apply to a catalogue and the
-// threshold each one means. Without these the model has no way to turn
-// "affordable" into a number, so it sorts by tuition and returns everything.
+// renderQualities describes the qualities that apply to a catalogue and how
+// each one is read. Without these the model has no way to turn "affordable"
+// into a sort, so it filters on nothing and returns the catalogue unshuffled.
 func renderQualities(b *strings.Builder, entity *Entity) {
 	for _, q := range qualities {
 		field, ok := entity.Field(q.Field)
 		if !ok || !field.Allows(q.Op) {
 			continue
 		}
-		fmt.Fprintf(b, "  quality \"%s\": filter %s %s %s, and sort by %s %s — %s\n",
-			q.Word, q.Field, q.Op, formatNumber(q.Value),
-			q.Field, sortDirection(q), q.Rationale)
+		if q.Threshold {
+			fmt.Fprintf(b, "  quality \"%s\": filter %s %s %s, and sort by %s %s — %s\n",
+				q.Word, q.Field, q.Op, formatNumber(q.Value),
+				q.Field, sortDirection(q), q.Rationale)
+			continue
+		}
+		fmt.Fprintf(b, "  quality \"%s\": sort by %s %s — %s\n",
+			q.Word, q.Field, sortDirection(q), q.Rationale)
 	}
 }
 
 // sortDirection is the order a quality ranks by: a lower tuition or a lower
 // acceptance rate is the better match, so both sort ascending.
 func sortDirection(q Quality) string {
-	switch q.Op {
-	case OpLt, OpLte:
+	if q.Ascending {
 		return "ascending"
-	default:
-		return "descending"
 	}
+	return "descending"
 }
 
 // formatNumber writes a threshold without a trailing ".0" when it is whole.
