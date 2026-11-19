@@ -1,6 +1,9 @@
 package nlsearch
 
-import "slices"
+import (
+	"slices"
+	"strings"
+)
 
 // The vocabulary is the contract between the model and the database. Every
 // attribute a user can ask about appears exactly once here, with a label the
@@ -64,6 +67,31 @@ type Field struct {
 	CommonValues []string
 	Code         Code
 	Sortable     bool
+}
+
+// Quality is a judgement the request makes about a field rather than a fact
+// it states: "affordable", "selective", "prestigious". The model cannot
+// derive a threshold from the word alone, so each quality carries the
+// threshold to use, and the prompt renders them for the model.
+//
+// A quality ranks by default. "Affordable universities" means the affordable
+// ones, ordered cheapest first — not a cut-off that silently returns nothing
+// when the data does not fit under it. The tuition in this catalogue runs
+// from 0 to 9,000,000 across currencies, so a fixed cut-off would drop every
+// US university.
+//
+// A quality that names a number is different: "selective" means an
+// acceptance rate under a threshold, and a row outside it is not selective.
+// Those set Threshold, and they filter as well as rank.
+type Quality struct {
+	Word      string
+	Field     string
+	Op        Op
+	Value     float64
+	Sort      bool
+	Threshold bool
+	Ascending bool
+	Rationale string
 }
 
 // Allows reports whether op is legal for this field.
@@ -212,6 +240,211 @@ var demographicNames = []string{
 	"LGBTQ+",
 	"Students with Disabilities",
 	"International Students",
+}
+
+// Qualities are the judgements a request makes instead of stating a number:
+// "affordable", "selective", "old". The model cannot work out a threshold
+// from the word on its own, so each one carries how it should be read.
+//
+// The money qualities rank rather than filter. Tuition in this catalogue runs
+// from 0 to 9,000,000 and is in the local currency of each row's country, so
+// a fixed cut-off would be meaningless — it would return nothing for a
+// country whose fees are all above it. "Affordable universities" therefore
+// means the universities ordered cheapest first, and the reader can see the
+// prices.
+//
+// The qualities that do have a natural line — a selective school, an old
+// one — set a threshold, and a row outside it is not that thing at all.
+var qualities = []Quality{
+	{
+		Word:      "affordable",
+		Field:     "tuition_max",
+		Op:        OpLte,
+		Sort:      true,
+		Ascending: true,
+		Rationale: "ordered by tuition, cheapest first",
+	},
+	{
+		Word:      "cheap",
+		Field:     "tuition_max",
+		Op:        OpLte,
+		Sort:      true,
+		Ascending: true,
+		Rationale: "ordered by tuition, cheapest first",
+	},
+	{
+		Word:      "budget",
+		Field:     "tuition_max",
+		Op:        OpLte,
+		Sort:      true,
+		Ascending: true,
+		Rationale: "ordered by tuition, cheapest first",
+	},
+	{
+		Word:      "inexpensive",
+		Field:     "tuition_max",
+		Op:        OpLte,
+		Sort:      true,
+		Ascending: true,
+		Rationale: "ordered by tuition, cheapest first",
+	},
+	{
+		Word:      "low cost",
+		Field:     "tuition_max",
+		Op:        OpLte,
+		Sort:      true,
+		Ascending: true,
+		Rationale: "ordered by tuition, cheapest first",
+	},
+	{
+		Word:      "expensive",
+		Field:     "tuition_min",
+		Op:        OpGte,
+		Sort:      true,
+		Ascending: false,
+		Rationale: "ordered by tuition, most expensive first",
+	},
+	{
+		Word:      "selective",
+		Field:     "acceptance_rate",
+		Op:        OpLt,
+		Ascending: true,
+		Value:     30,
+		Sort:      true,
+		Threshold: true,
+		Rationale: "a university is selective when it accepts fewer than 30 percent of applicants",
+	},
+	{
+		Word:      "prestigious",
+		Field:     "acceptance_rate",
+		Op:        OpLt,
+		Ascending: true,
+		Value:     20,
+		Sort:      true,
+		Threshold: true,
+		Rationale: "a university is prestigious when it accepts fewer than 20 percent of applicants",
+	},
+	{
+		Word:      "old",
+		Field:     "founded_year",
+		Op:        OpLt,
+		Ascending: true,
+		Value:     1950,
+		Sort:      true,
+		Threshold: true,
+		Rationale: "a university is old when it was founded before 1950",
+	},
+	{
+		Word:      "established",
+		Field:     "founded_year",
+		Op:        OpLt,
+		Ascending: true,
+		Value:     1950,
+		Sort:      true,
+		Threshold: true,
+		Rationale: "a university is established when it was founded before 1950",
+	},
+}
+
+// MatchQuality finds the quality a request names, if it names one. The
+// question is matched on its words, so a phrase like "low cost" is found
+// before the single word "low" would be.
+//
+// The entity matters: a quality is only offered for a catalogue that has the
+// field it refers to. "affordable" needs a tuition field, so it is not
+// offered for scholarships.
+func MatchQuality(entity *Entity, question string) (Quality, bool) {
+	if entity == nil {
+		return Quality{}, false
+	}
+	lowered := strings.ToLower(question)
+	for _, q := range qualities {
+		if !containsPhrase(lowered, q.Word) {
+			continue
+		}
+		if precededBySuperlative(lowered, q.Word) {
+			continue
+		}
+		field, ok := entity.Field(q.Field)
+		if !ok || !field.Allows(q.Op) {
+			continue
+		}
+		return q, true
+	}
+	return Quality{}, false
+}
+
+// superlativeMarkers turn a quality into an ordering. Only the words that
+// already name an extreme do this: "least expensive" asks for the cheapest
+// one, which is a sort, while "most affordable" still asks for a set of
+// affordable universities, which is a filter.
+//
+// The marker has to sit directly before the quality word, and "most" is not
+// one of them: "most affordable" is a set, "least affordable" is not.
+var superlativeMarkers = []string{"least", "cheapest", "lowest", "highest", "biggest", "largest", "smallest"}
+
+// precededBySuperlative reports whether the word before the phrase makes the
+// phrase an ordering rather than a threshold.
+func precededBySuperlative(text, phrase string) bool {
+	offset := 0
+	for {
+		i := strings.Index(text[offset:], phrase)
+		if i < 0 {
+			return false
+		}
+		i += offset
+		before := i == 0 || !isWordByte(text[i-1])
+		after := i+len(phrase) == len(text) || !isWordByte(text[i+len(phrase)])
+		if before && after {
+			prefix := strings.TrimSpace(text[:i])
+			for _, marker := range superlativeMarkers {
+				if strings.HasSuffix(prefix, marker) {
+					return true
+				}
+			}
+			return false
+		}
+		offset = i + len(phrase)
+	}
+}
+
+// containsPhrase reports whether a phrase appears in the text as whole words.
+// A plain substring test would match "cheap" inside "cheapest", and the two
+// mean different things: "cheap" is a threshold, "cheapest" is an ordering.
+func containsPhrase(text, phrase string) bool {
+	if phrase == "" {
+		return false
+	}
+	offset := 0
+	for {
+		i := strings.Index(text[offset:], phrase)
+		if i < 0 {
+			return false
+		}
+		i += offset
+		before := i == 0 || !isWordByte(text[i-1])
+		after := i+len(phrase) == len(text) || !isWordByte(text[i+len(phrase)])
+		if before && after {
+			return true
+		}
+		offset = i + len(phrase)
+	}
+}
+
+// isWordByte reports whether a byte is part of a word. Anything that is not a
+// letter, a digit or an underscore is a boundary.
+func isWordByte(b byte) bool {
+	switch {
+	case b >= 'a' && b <= 'z':
+		return true
+	case b >= 'A' && b <= 'Z':
+		return true
+	case b >= '0' && b <= '9':
+		return true
+	case b == '_':
+		return true
+	}
+	return false
 }
 
 // scholarshipEntity is the related entity reachable from universities and

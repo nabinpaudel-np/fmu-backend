@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"fmu-backend/internal/countryalias"
 )
 
 // The model speaks in two layers: a JSON DTO it produces, and a validated
@@ -272,6 +274,65 @@ func validatePlan(
 	return plan, nil
 }
 
+// ApplyQuality makes sure a request that names a quality is answered as a
+// filter, not only as an ordering.
+//
+// The model is told about the qualities and their thresholds, and it usually
+// does the right thing. This is the backstop for when it does not: "affordable
+// universities" means a set of affordable universities, and a plan that only
+// sorts by tuition returns every university with the cheapest first, which
+// reads as "no results" to anyone who wanted a shortlist.
+//
+// The filter is only added when the plan does not already constrain the same
+// field, so a plan that reads "universities under 10000" keeps its own number
+// rather than being overwritten by the default threshold.
+func ApplyQuality(plan *Plan, question string) {
+	if plan == nil {
+		return
+	}
+	quality, ok := MatchQuality(plan.Entity, question)
+	if !ok {
+		return
+	}
+	// A quality with a threshold filters as well as ranks: a university that
+	// accepts 60 percent of applicants is not selective.
+	if quality.Threshold && !planAlreadyFilters(plan, quality.Field) {
+		plan.Filters = append(plan.Filters, FilterSpec{
+			Field: quality.Field,
+			Op:    quality.Op,
+			Value: Value{Kind: ValueNumber, Num: quality.Value},
+		})
+	}
+	// A quality without one only ranks. "Affordable" is a way of asking for
+	// the cheap ones, and a fixed cut-off would return nothing whenever the
+	// data sits above it — which is most of the time, because tuition here
+	// runs from 0 to 9,000,000 across currencies.
+	if plan.Sort == nil && quality.Sort {
+		plan.Sort = &SortSpec{Field: quality.Field, Direction: sortDirection(quality)}
+	}
+	if plan.Assumptions == "" {
+		plan.Assumptions = quality.Rationale
+	} else {
+		plan.Assumptions = truncate(plan.Assumptions+" — "+quality.Rationale, maxAssumptionLength)
+	}
+}
+
+// planAlreadyFilters reports whether the plan already constrains a field, at
+// the top level or inside a group of alternatives.
+func planAlreadyFilters(plan *Plan, field string) bool {
+	for _, f := range plan.Filters {
+		if f.Field == field {
+			return true
+		}
+		for _, alt := range f.Any {
+			if alt.Field == field {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // validateCondition checks one constraint against a field definition.
 func validateCondition(entity *Entity, c ConditionDTO) (FilterSpec, *ValidationError) {
 	hasFilter := c.Field != ""
@@ -437,7 +498,7 @@ func normaliseValue(field Field, op Op, raw any) (Value, *ValidationError) {
 					return Value{}, invalid("expected a list of strings")
 				}
 				if s = strings.TrimSpace(s); s != "" {
-					out = append(out, translateCode(field.Code, s))
+					out = append(out, translateCode(field.Code, s)...)
 				}
 			}
 			if len(out) == 0 {
@@ -448,7 +509,11 @@ func normaliseValue(field Field, op Op, raw any) (Value, *ValidationError) {
 		switch v := raw.(type) {
 		case string:
 			if v = strings.TrimSpace(v); v != "" {
-				return Value{Kind: ValueString, Str: translateCode(field.Code, v)}, nil
+				aliases := translateCode(field.Code, v)
+				if len(aliases) == 1 {
+					return Value{Kind: ValueString, Str: aliases[0]}, nil
+				}
+				return Value{Kind: ValueList, List: aliases}, nil
 			}
 		case float64:
 			// Numbers are legitimate values for text columns ("founded in 1998").
@@ -460,16 +525,24 @@ func normaliseValue(field Field, op Op, raw any) (Value, *ValidationError) {
 	return Value{}, invalid("unsupported field type")
 }
 
-// translateCode turns a country or state name into the code the column
-// holds. A question says "the United States" where the catalogue says "US".
-func translateCode(code Code, value string) string {
+// translateCode widens a country or state name into every spelling of that
+// place.
+//
+// The catalogue stores a country as a full name ("United States of america")
+// and a state as its full name too, but a question names them in words or by
+// their code. Comparing the stored full name against the code matches
+// nothing, so the value is widened into every spelling that means the same
+// place and the compiler matches against the set.
+//
+// A field that is not a country or a state keeps the value it was given.
+func translateCode(code Code, value string) []string {
 	switch code {
 	case CodeCountry:
-		return countryCode(value)
+		return countryalias.CountryAliases(countryCode(value))
 	case CodeState:
-		return stateCode(value)
+		return countryalias.StateAliases(stateCode(value))
 	}
-	return value
+	return []string{value}
 }
 
 // checkClosedVocabulary enforces a field's fixed value list.

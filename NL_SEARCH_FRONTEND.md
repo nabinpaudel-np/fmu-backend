@@ -418,6 +418,25 @@ city centre" are qualities, not fields. The backend maps them to the closest
 field and threshold and tells you what it did in `interpretation.assumptions`.
 That's the intended behaviour — show the assumption rather than hiding it.
 
+A money quality — **affordable, cheap, budget, inexpensive, low cost** — is a
+**ranking**, not a cut-off. It returns every university ordered by tuition with
+the cheapest first. The tuition in the catalogue runs from 0 to 9,000,000 and is
+in each row's own currency, so a fixed threshold would drop every university
+whose fees sit above it. If the question states its own number ("universities
+under 10000"), that number is used instead.
+
+A quality with a natural line is a **filter** as well as a ranking: selective →
+acceptance rate under 30; prestigious → under 20; old / established → founded
+before 1950. Rows outside that line are not that thing at all.
+
+**An ordering word on its own — "cheapest", "least expensive" — is not a
+quality.** It returns the whole catalogue ordered by that field, with the
+extreme first. "Cheapest universities" is a sort; "affordable universities" is
+the same ordering under a friendlier name.
+
+Only universities carry tuition. On a college or a programme, a money quality
+has nothing to rank by and is left out of the answer.
+
 **Part of the question may not be searchable.** Anything with no matching
 field is listed in `interpretation.unmapped` and the rest of the question is
 still searched.

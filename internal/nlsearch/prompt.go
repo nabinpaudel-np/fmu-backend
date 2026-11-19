@@ -3,6 +3,7 @@ package nlsearch
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -22,10 +23,17 @@ Rules:
 - Money amounts are plain numbers with no currency symbol, no thousands separators and no units: 500000, not "500,000 NPR". "2 lakh" is 200000.
 - Percentages are numbers between 0 and 100. GPA is a number between 0 and 5.
 - Split a place name into its parts: "Kathmandu Nepal" means city "Kathmandu" and country "Nepal".
-- A country is written as its two-letter code ("US", "GB", "NP") and a US state as its two-letter code ("MA"), because that is how the catalogue stores them.
+- A country is written as its two-letter code ("US", "GB", "NP") and a US state as its two-letter code ("MA"). The backend widens the code to every spelling of that place, so either the code or the full name works.
 - For a name field, put only the name itself, not the whole phrase around it.
 - When the request describes a quality rather than a fact ("great", "best", "affordable", "near"), map it to the closest field and threshold, and say what you did in "assumptions".
 - When part of the request has no matching field, put that part in "unmapped" and search with the rest.
+
+Answering a quality:
+- A quality is a judgement about a field, not a fact about it. The schema section lists the known qualities and how each one is read.
+- A quality that names a threshold goes in "filters" as that comparison, and also in "sort".
+- A quality that only ranks goes in "sort" and leaves "filters" empty. "affordable universities" is ordered by tuition with the cheapest first; it does not exclude anything, because a cut-off would drop every university whose fees sit above it.
+- Use the field and number given in the schema section. Do not invent a threshold of your own.
+- Say in "assumptions" which quality you applied, so the answer can be checked.
 
 Answering a superlative:
 - A word like "cheapest", "lowest", "most", "largest" or "smallest" is an instruction about ordering, not a field to filter on. Put it in "sort" and leave "filters" empty for it.
@@ -80,6 +88,7 @@ func renderAllVocabulary() string {
 				f.Name, f.Kind, renderOps(f.Ops), f.Label)
 			renderValues(&b, "    ", f)
 		}
+		renderQualities(&b, entity)
 		if len(entity.Content) > 0 {
 			labels := make([]string, 0, len(entity.Content))
 			for _, c := range entity.Content {
@@ -98,6 +107,40 @@ func renderAllVocabulary() string {
 		}
 	}
 	return b.String()
+}
+
+// renderQualities describes the qualities that apply to a catalogue and how
+// each one is read. Without these the model has no way to turn "affordable"
+// into a sort, so it filters on nothing and returns the catalogue unshuffled.
+func renderQualities(b *strings.Builder, entity *Entity) {
+	for _, q := range qualities {
+		field, ok := entity.Field(q.Field)
+		if !ok || !field.Allows(q.Op) {
+			continue
+		}
+		if q.Threshold {
+			fmt.Fprintf(b, "  quality \"%s\": filter %s %s %s, and sort by %s %s — %s\n",
+				q.Word, q.Field, q.Op, formatNumber(q.Value),
+				q.Field, sortDirection(q), q.Rationale)
+			continue
+		}
+		fmt.Fprintf(b, "  quality \"%s\": sort by %s %s — %s\n",
+			q.Word, q.Field, sortDirection(q), q.Rationale)
+	}
+}
+
+// sortDirection is the order a quality ranks by: a lower tuition or a lower
+// acceptance rate is the better match, so both sort ascending.
+func sortDirection(q Quality) string {
+	if q.Ascending {
+		return "ascending"
+	}
+	return "descending"
+}
+
+// formatNumber writes a threshold without a trailing ".0" when it is whole.
+func formatNumber(v float64) string {
+	return strconv.FormatFloat(v, 'f', -1, 64)
 }
 
 // renderValues describes what a field may hold.
