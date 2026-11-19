@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/joho/godotenv"
 
+	"fmu-backend/internal/adminuser"
 	"fmu-backend/internal/auth"
 	"fmu-backend/internal/claim"
 	"fmu-backend/internal/cloudinary"
@@ -166,6 +167,14 @@ func main() {
 	resetSvc := passwordreset.NewService(resetRepo, userSvc, tokenSvc, mailer, cfg, nil)
 	resetHandler := passwordreset.NewHandler(resetSvc, cfg)
 
+	// Admin user management. The reset sender is the same password-reset
+	// service the public endpoint uses, so an admin-triggered reset and a
+	// self-service one take the same path: the account holder is emailed a
+	// link and chooses their own password.
+	adminUserRepo := adminuser.NewRepository(queries)
+	adminUserSvc := adminuser.NewService(adminUserRepo, userSvc, resetSvc)
+	adminUserHandler := adminuser.NewHandler(adminUserSvc)
+
 	// Natural-language search. The model is optional: without a key the app
 	// still boots, the endpoint reports itself as unavailable, and the
 	// catalogue's own search endpoints keep serving the frontend.
@@ -234,6 +243,7 @@ func main() {
 	favorites.RegisterRoutes(r, favoritesHandler, authMW, studentMW)
 	studentprofile.RegisterRoutes(r, profileHandler, authMW, studentMW)
 	claim.RegisterRoutes(r, claimHandler, authMW, adminMW, optionalAuthMW)
+	adminuser.RegisterRoutes(r, adminUserHandler, authMW, adminMW)
 	counselling.RegisterRoutes(r, counsellingHandler, authMW, adminMW, adminOrRepMW)
 	programs.RegisterRoutes(r, programsHandler, authMW, adminMW)
 	scholarship.RegisterRoutes(r, scholarshipHandler, authMW, adminMW, optionalAuthMW)

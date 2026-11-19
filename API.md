@@ -25,12 +25,13 @@ Backend API for the FMU (Find My University) application. This document covers e
 12. [Uploads endpoints](#uploads-endpoints)
 13. [Favorites endpoints](#favorites-endpoints)
 14. [Claim endpoints](#claim-endpoints)
-15. [Lookup reference data](#lookup-reference-data)
-16. [Program endpoints](#program-endpoints)
-17. [Scholarship endpoints](#scholarship-endpoints)
-18. [Drafts and publishing](#drafts-and-publishing)
-19. [Frontend integration checklist](#putting-it-all-together--frontend-integration-checklist)
-20. [CORS](#cors)
+15. [Admin user management endpoints](#admin-user-management-endpoints)
+16. [Lookup reference data](#lookup-reference-data)
+17. [Program endpoints](#program-endpoints)
+18. [Scholarship endpoints](#scholarship-endpoints)
+19. [Drafts and publishing](#drafts-and-publishing)
+20. [Frontend integration checklist](#putting-it-all-together--frontend-integration-checklist)
+21. [CORS](#cors)
 
 ---
 
@@ -162,11 +163,14 @@ There are three roles. A `representative` account is additionally bound to exact
 
 A university-scoped representative can update their bound university and create colleges beneath it. A college-scoped representative can update only their bound college. Both can use the authenticated image upload endpoints.
 
-**Promoting a user to admin** (currently done via SQL — no public endpoint):
+**Promoting a user to admin** — use the admin endpoint:
 
-```sql
-UPDATE users SET role = 'admin' WHERE email = 'you@example.com';
+```http
+PATCH /api/v1/admin/users/{id}/role
+{ "role": "admin" }
 ```
+
+See [Admin user management endpoints](#admin-user-management-endpoints).
 
 The change takes effect on the user's next login (existing session cookies still carry the old `student` role until the access token expires or the user logs in again).
 
@@ -3179,6 +3183,131 @@ Same request/response shapes as the admin counterparts; same auth role gating (`
 - [ ] Hide the resume field for institution-specific forms; the columns don't apply there. The backend ignores `resume_url` on specific rows.
 
 ---
+---
+
+## Admin user management endpoints
+
+Admins manage the accounts themselves: list them, read one, change a role, send a reset link, or remove one. Every endpoint below requires the `admin` role — a `student` or `representative` gets `403`.
+
+| Method | Path                                          | Description                                          |
+|--------|-----------------------------------------------|------------------------------------------------------|
+| GET    | `/api/v1/admin/users`                        | List users; filter by `role` and `search`           |
+| GET    | `/api/v1/admin/users/{id}`                   | Get a single user                                    |
+| PATCH  | `/api/v1/admin/users/{id}/role`              | Change a user's role                                 |
+| POST   | `/api/v1/admin/users/{id}/reset-password`    | Email the account holder a password reset link      |
+| DELETE | `/api/v1/admin/users/{id}`                   | Delete a user                                        |
+
+### GET `/api/v1/admin/users`
+
+Lists accounts, newest first. Both filters are optional.
+
+| Query param | Values                                    | Notes                                             |
+|-------------|-------------------------------------------|---------------------------------------------------|
+| `role`      | `admin`, `student`, `representative`      | Empty means every role                            |
+| `search`    | any text                                  | Matched case-insensitively against name and email |
+| `page`      | integer                                   | Default `1`                                       |
+| `page_size` | integer                                   | Default `20`, max `100`                           |
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "id": "d3b07384-d9a2-4e0a-b71e-1c9f3e3e0a1b",
+        "full_name": "Ada Lovelace",
+        "email": "ada@example.com",
+        "avatar": "https://cdn.example.com/avatars/ada.png",
+        "role": "student",
+        "account_type": "password",
+        "email_verified": true,
+        "created_at": "2026-06-28T10:55:59Z",
+        "updated_at": "2026-06-28T10:55:59Z"
+      }
+    ],
+    "meta": { "page": 1, "page_size": 20, "total": 1, "total_pages": 1 }
+  }
+}
+```
+
+`account_type` tells the dashboard how the account signs in:
+
+- `password` — the account has a password, so a reset link will work.
+- `oauth` — the account came in through Google and has no password, so a reset link would lead nowhere. The dashboard should offer "sign in with Google" instead.
+
+The password hash is never included, in this response or any other.
+
+A `representative` row also carries the **name** of the institution it is
+bound to, alongside the id:
+
+| Field | Type | Notes |
+|---|---|---|
+| `representative_university_name` | string? | The name of that university. Absent when there is none. |
+| `representative_college_name` | string? | The name of that college. Absent when there is none. |
+
+They follow the same rules as the ids: only for the `representative` role,
+only one of the two is ever set, and the name is missing when the institution
+it was bound to has been deleted. See
+`new_update_rep_admin_user.md` for the frontend guide.
+
+### GET `/api/v1/admin/users/{id}`
+
+Returns the same row as the list, for one user.
+
+**Errors:** `404` — no such user.
+
+### PATCH `/api/v1/admin/users/{id}/role`
+
+Changes a user's role. This is the supported way to promote a user to `admin` — the SQL one-liner in [Roles & permissions](#roles--permissions) is no longer needed.
+
+```json
+{ "role": "representative", "representative_university_id": "9a4f1b32-8e57-4c2f-bd63-2e7a8c4f9b10" }
+```
+
+| Field                        | Notes                                                                     |
+|------------------------------|---------------------------------------------------------------------------|
+| `role`                       | Required. One of `admin`, `student`, `representative`.                   |
+| `representative_university_id` | Only for the `representative` role. Binds the account to one university. |
+| `representative_college_id`    | Only for the `representative` role. Binds the account to one college.    |
+
+**Scope rules:**
+
+- A `representative` must be bound to **exactly one** university **or** one college. Sending neither, or both, is a `400`.
+- The other two roles keep no binding. Changing away from `representative` **clears** the existing binding, so the institution is free for someone else to claim and the old binding stops granting edit rights over it.
+- A `representative` account whose university or college already has a representative gets `409` — the database enforces one representative per institution.
+
+**Errors:** `400` — unknown role or missing scope · `404` — no such user · `409` — the institution already has a representative, or the account is the last admin and cannot be demoted.
+
+### POST `/api/v1/admin/users/{id}/reset-password`
+
+Emails the account holder a reset link. The admin never sees or sets the new password — the user follows the link and chooses their own, exactly as with the self-service [forgot password](#post-apiv1authforgot-password) flow.
+
+No request body.
+
+```json
+{
+  "success": true,
+  "data": { "sent": true, "email": "ada@example.com" }
+}
+```
+
+Any earlier unused reset link for that account is invalidated first, so only the newest one works.
+
+**Errors:** `404` — no such user · `409` — the account signs in with Google and has no password to reset · `503` — email is not configured on the server.
+
+### DELETE `/api/v1/admin/users/{id}`
+
+Removes the account. The rows that reference it go with it: refresh tokens, favourites and the claims it created all cascade in the database.
+
+**Refusals:**
+
+| Status | When                                                              |
+|--------|-------------------------------------------------------------------|
+| `409`  | You are deleting your own account.                                 |
+| `409`  | It is the last admin account. Nobody would be left able to manage the catalogue. |
+
+**Errors:** `404` — no such user.
+
 ---
 
 ## Lookup reference data
