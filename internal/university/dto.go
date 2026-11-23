@@ -85,13 +85,13 @@ type CreateUniversityRequest struct {
 	IsPopular        bool     `json:"is_popular" example:"true"`
 	IsFeatured       bool     `json:"is_featured" example:"true"`
 
-	MapsUrl          string  `json:"maps_url" validate:"omitempty,url,max=500" example:"https://maps.google.com/?q=MIT"`
-	FullAddress      string  `json:"full_address" validate:"omitempty,max=500" example:"77 Massachusetts Ave, Cambridge, MA 02139"`
-	EmploymentRate   float64 `json:"employment_rate" validate:"omitempty,gte=0,lte=100" example:"92.5"`
-	ResearchOutput   string  `json:"research_output" validate:"omitempty,max=50" example:"R1"`
-	HousingType      string  `json:"housing_type" validate:"omitempty,max=50" example:"On-Campus"`
-	SeoTitle         string  `json:"seo_title" validate:"omitempty,max=70" example:"MIT - Top Research University"`
-	SeoDescription   string  `json:"seo_description" validate:"omitempty,max=160" example:"Learn about MIT admissions, programs, and campus life."`
+	MapsUrl        string  `json:"maps_url" validate:"omitempty,url,max=500" example:"https://maps.google.com/?q=MIT"`
+	FullAddress    string  `json:"full_address" validate:"omitempty,max=500" example:"77 Massachusetts Ave, Cambridge, MA 02139"`
+	EmploymentRate float64 `json:"employment_rate" validate:"omitempty,gte=0,lte=100" example:"92.5"`
+	ResearchOutput string  `json:"research_output" validate:"omitempty,max=50" example:"R1"`
+	HousingType    string  `json:"housing_type" validate:"omitempty,max=50" example:"On-Campus"`
+	SeoTitle       string  `json:"seo_title" validate:"omitempty,max=70" example:"MIT - Top Research University"`
+	SeoDescription string  `json:"seo_description" validate:"omitempty,max=160" example:"Learn about MIT admissions, programs, and campus life."`
 
 	DegreeLevelIDs        []string `json:"degree_level_ids" validate:"required,min=1,dive,uuid"`
 	MajorIDs              []string `json:"major_ids" validate:"required,min=1,dive,uuid"`
@@ -187,24 +187,28 @@ type AllLookupsResponse struct {
 }
 
 type UniversityListItem struct {
-	ID                string  `json:"id"`
-	Name              string  `json:"name"`
-	Slug              string  `json:"slug"`
-	Country           string  `json:"country"`
-	Continent         string  `json:"continent"`
-	State             string  `json:"state"`
-	City              string  `json:"city"`
-	Logo              string  `json:"logo"`
-	CoverImage        string  `json:"cover_image"`
-	InstitutionType   string  `json:"institution_type"`
-	CampusSetting     string  `json:"campus_setting"`
-	TuitionMin        int32   `json:"tuition_min"`
-	TuitionMax        int32   `json:"tuition_max"`
-	AcceptanceRate    float64 `json:"acceptance_rate"`
-	IsPopular         bool    `json:"is_popular"`
-	IsFeatured        bool    `json:"is_featured"`
-	IsFavorited       bool    `json:"is_favorited"`
-	HasRepresentative bool    `json:"has_representative"`
+	ID                string     `json:"id"`
+	Name              string     `json:"name"`
+	Slug              string     `json:"slug"`
+	Country           string     `json:"country"`
+	Continent         string     `json:"continent"`
+	State             string     `json:"state"`
+	City              string     `json:"city"`
+	Logo              string     `json:"logo"`
+	CoverImage        string     `json:"cover_image"`
+	InstitutionType   string     `json:"institution_type"`
+	CampusSetting     string     `json:"campus_setting"`
+	TuitionMin        int32      `json:"tuition_min"`
+	TuitionMax        int32      `json:"tuition_max"`
+	AcceptanceRate    float64    `json:"acceptance_rate"`
+	IsPopular         bool       `json:"is_popular"`
+	IsFeatured        bool       `json:"is_featured"`
+	IsFavorited       bool       `json:"is_favorited"`
+	HasRepresentative bool       `json:"has_representative"`
+	Status            string     `json:"status"`
+	PublishedAt       *time.Time `json:"published_at"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
 type UniversityDetailResponse struct {
@@ -261,54 +265,54 @@ type BulkUploadResponse struct {
 }
 
 type CreateUniversityResponse struct {
-	ID                       string    `json:"id"`
-	Name                     string    `json:"name"`
-	Slug                     string    `json:"slug"`
-	Overview                 string    `json:"overview"`
-	Excerpt                  string    `json:"excerpt"`
-	Country                  string    `json:"country"`
-	Continent                string    `json:"continent"`
-	State                    string    `json:"state"`
-	City                     string    `json:"city"`
-	FullLocation             string    `json:"full_location"`
-	CoverImage               string    `json:"cover_image"`
-	Logo                     string    `json:"logo"`
-	InstitutionType          string    `json:"institution_type"`
-	CampusSetting            string    `json:"campus_setting"`
-	InStateTuition           float64   `json:"in_state_tuition"`
-	OutOfStateTuition        float64   `json:"out_of_state_tuition"`
-	InternationalTuition     float64   `json:"international_tuition"`
-	NeedBasedAid             bool      `json:"need_based_aid"`
-	MeritScholarships        bool      `json:"merit_scholarships"`
-	WorkStudy                bool      `json:"work_study"`
-	NoApplicationFee         bool      `json:"no_application_fee"`
-	AcceptanceRate           float64   `json:"acceptance_rate"`
-	TestingPolicy            string    `json:"testing_policy"`
-	SatRange                 string    `json:"sat_range"`
-	ActRange                 string    `json:"act_range"`
-	OnCampusHousing          bool      `json:"on_campus_housing"`
-	FreshmenRequiredOnCampus bool      `json:"freshmen_required_on_campus"`
-	ContactEmail             string    `json:"contact_email"`
-	ContactPhone             string    `json:"contact_phone"`
-	Website                  string    `json:"website"`
-	Zipcode                  string    `json:"zipcode"`
-	TuitionMin               int32     `json:"tuition_min"`
-	TuitionMax               int32     `json:"tuition_max"`
-	AvgHighSchoolGpa         float64   `json:"avg_high_school_gpa"`
-	FoundedYear              int32     `json:"founded_year"`
-	CampusSize               string    `json:"campus_size"`
-	GalleryImages            []string  `json:"gallery_images"`
-	IsPopular                bool      `json:"is_popular"`
-	IsFeatured               bool      `json:"is_featured"`
-	MapsUrl                  string    `json:"maps_url"`
-	FullAddress              string    `json:"full_address"`
-	EmploymentRate           float64   `json:"employment_rate"`
-	ResearchOutput           string    `json:"research_output"`
-	HousingType              string    `json:"housing_type"`
-	SeoTitle                 string    `json:"seo_title"`
-	SeoDescription           string    `json:"seo_description"`
-	Status                   string    `json:"status" example:"published"`
+	ID                       string     `json:"id"`
+	Name                     string     `json:"name"`
+	Slug                     string     `json:"slug"`
+	Overview                 string     `json:"overview"`
+	Excerpt                  string     `json:"excerpt"`
+	Country                  string     `json:"country"`
+	Continent                string     `json:"continent"`
+	State                    string     `json:"state"`
+	City                     string     `json:"city"`
+	FullLocation             string     `json:"full_location"`
+	CoverImage               string     `json:"cover_image"`
+	Logo                     string     `json:"logo"`
+	InstitutionType          string     `json:"institution_type"`
+	CampusSetting            string     `json:"campus_setting"`
+	InStateTuition           float64    `json:"in_state_tuition"`
+	OutOfStateTuition        float64    `json:"out_of_state_tuition"`
+	InternationalTuition     float64    `json:"international_tuition"`
+	NeedBasedAid             bool       `json:"need_based_aid"`
+	MeritScholarships        bool       `json:"merit_scholarships"`
+	WorkStudy                bool       `json:"work_study"`
+	NoApplicationFee         bool       `json:"no_application_fee"`
+	AcceptanceRate           float64    `json:"acceptance_rate"`
+	TestingPolicy            string     `json:"testing_policy"`
+	SatRange                 string     `json:"sat_range"`
+	ActRange                 string     `json:"act_range"`
+	OnCampusHousing          bool       `json:"on_campus_housing"`
+	FreshmenRequiredOnCampus bool       `json:"freshmen_required_on_campus"`
+	ContactEmail             string     `json:"contact_email"`
+	ContactPhone             string     `json:"contact_phone"`
+	Website                  string     `json:"website"`
+	Zipcode                  string     `json:"zipcode"`
+	TuitionMin               int32      `json:"tuition_min"`
+	TuitionMax               int32      `json:"tuition_max"`
+	AvgHighSchoolGpa         float64    `json:"avg_high_school_gpa"`
+	FoundedYear              int32      `json:"founded_year"`
+	CampusSize               string     `json:"campus_size"`
+	GalleryImages            []string   `json:"gallery_images"`
+	IsPopular                bool       `json:"is_popular"`
+	IsFeatured               bool       `json:"is_featured"`
+	MapsUrl                  string     `json:"maps_url"`
+	FullAddress              string     `json:"full_address"`
+	EmploymentRate           float64    `json:"employment_rate"`
+	ResearchOutput           string     `json:"research_output"`
+	HousingType              string     `json:"housing_type"`
+	SeoTitle                 string     `json:"seo_title"`
+	SeoDescription           string     `json:"seo_description"`
+	Status                   string     `json:"status" example:"published"`
 	PublishedAt              *time.Time `json:"published_at" swaggertype:"string" example:"2026-07-30T12:00:00Z"`
-	CreatedAt                time.Time `json:"created_at"`
-	UpdatedAt                time.Time `json:"updated_at"`
+	CreatedAt                time.Time  `json:"created_at"`
+	UpdatedAt                time.Time  `json:"updated_at"`
 }

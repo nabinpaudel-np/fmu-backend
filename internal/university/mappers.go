@@ -153,6 +153,10 @@ func toUniversityListItem(u sqlc.University) UniversityListItem {
 		AcceptanceRate:  fromPgNumeric(u.AcceptanceRate),
 		IsPopular:       u.IsPopular,
 		IsFeatured:      u.IsFeatured,
+		Status:          u.Status,
+		PublishedAt:     publishedAtPtr(u.PublishedAt),
+		CreatedAt:       u.CreatedAt,
+		UpdatedAt:       u.UpdatedAt,
 	}
 }
 
@@ -184,9 +188,13 @@ func toUniversityDetailResponse(
 		DegreeLevels:             toLookupItems[sqlc.DegreeLevel, DegreeLevelResponse](degreeLevels, func(d sqlc.DegreeLevel) DegreeLevelResponse { return DegreeLevelResponse{ID: d.ID, Name: d.Name} }),
 		Majors:                   toLookupItems[sqlc.Major, MajorResponse](majors, func(m sqlc.Major) MajorResponse { return MajorResponse{ID: m.ID, Name: m.Name} }),
 		StudyFormats:             toLookupItems[sqlc.StudyFormat, StudyFormatResponse](studyFormats, func(s sqlc.StudyFormat) StudyFormatResponse { return StudyFormatResponse{ID: s.ID, Name: s.Name} }),
-		SpecialAffiliations:      toLookupItems[sqlc.SpecialAffiliation, SpecialAffiliationResponse](specialAffiliations, func(s sqlc.SpecialAffiliation) SpecialAffiliationResponse { return SpecialAffiliationResponse{ID: s.ID, Name: s.Name} }),
-		Athletics:                toLookupItems[sqlc.Athletic, AthleticResponse](athletics, func(a sqlc.Athletic) AthleticResponse { return AthleticResponse{ID: a.ID, Name: a.Name} }),
-		SupportServices:          toLookupItems[sqlc.SupportService, SupportServiceResponse](supportServices, func(s sqlc.SupportService) SupportServiceResponse { return SupportServiceResponse{ID: s.ID, Name: s.Name} }),
+		SpecialAffiliations: toLookupItems[sqlc.SpecialAffiliation, SpecialAffiliationResponse](specialAffiliations, func(s sqlc.SpecialAffiliation) SpecialAffiliationResponse {
+			return SpecialAffiliationResponse{ID: s.ID, Name: s.Name}
+		}),
+		Athletics: toLookupItems[sqlc.Athletic, AthleticResponse](athletics, func(a sqlc.Athletic) AthleticResponse { return AthleticResponse{ID: a.ID, Name: a.Name} }),
+		SupportServices: toLookupItems[sqlc.SupportService, SupportServiceResponse](supportServices, func(s sqlc.SupportService) SupportServiceResponse {
+			return SupportServiceResponse{ID: s.ID, Name: s.Name}
+		}),
 	}
 }
 

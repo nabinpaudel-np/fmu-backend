@@ -17,9 +17,9 @@ type CreateCollegeRequest struct {
 	Zipcode      string `json:"zipcode"       validate:"omitempty,max=20"`
 	FullAddress  string `json:"full_address"  validate:"omitempty,max=500"`
 
-	CoverImage string `json:"cover_image" validate:"omitempty,url"`
-	Logo       string `json:"logo"        validate:"omitempty,url"`
-	MapsUrl    string `json:"maps_url"    validate:"omitempty,url,max=500"`
+	CoverImage    string   `json:"cover_image" validate:"omitempty,url"`
+	Logo          string   `json:"logo"        validate:"omitempty,url"`
+	MapsUrl       string   `json:"maps_url"    validate:"omitempty,url,max=500"`
 	GalleryImages []string `json:"gallery_images" validate:"omitempty,dive,url"`
 
 	InstitutionType string `json:"institution_type" validate:"omitempty,max=50"`
@@ -51,38 +51,38 @@ type CreateCollegeRequest struct {
 }
 
 type CreateCollegeResponse struct {
-	ID              string   `json:"id"`
-	Name            string   `json:"name"`
-	Slug            string   `json:"slug"`
-	UniversityID    string   `json:"university_id"`
-	Overview        string   `json:"overview"`
-	Excerpt         string   `json:"excerpt"`
-	Country         string   `json:"country"`
-	Continent       string   `json:"continent"`
-	State           string   `json:"state"`
-	City            string   `json:"city"`
-	FullLocation    string   `json:"full_location"`
-	Zipcode         string   `json:"zipcode"`
-	FullAddress     string   `json:"full_address"`
-	CoverImage      string   `json:"cover_image"`
-	Logo            string   `json:"logo"`
-	MapsUrl         string   `json:"maps_url"`
-	GalleryImages   []string `json:"gallery_images"`
-	InstitutionType string   `json:"institution_type"`
-	CampusSetting   string   `json:"campus_setting"`
-	ContactEmail    string   `json:"contact_email"`
-	ContactPhone    string   `json:"contact_phone"`
-	Website         string   `json:"website"`
-	FoundedYear     int32    `json:"founded_year"`
-	CampusSize      string   `json:"campus_size"`
-	IsPopular       bool     `json:"is_popular"`
-	IsFeatured      bool     `json:"is_featured"`
-	SeoTitle        string   `json:"seo_title"`
-	SeoDescription  string   `json:"seo_description"`
-	Status          string   `json:"status" example:"published"`
+	ID              string     `json:"id"`
+	Name            string     `json:"name"`
+	Slug            string     `json:"slug"`
+	UniversityID    string     `json:"university_id"`
+	Overview        string     `json:"overview"`
+	Excerpt         string     `json:"excerpt"`
+	Country         string     `json:"country"`
+	Continent       string     `json:"continent"`
+	State           string     `json:"state"`
+	City            string     `json:"city"`
+	FullLocation    string     `json:"full_location"`
+	Zipcode         string     `json:"zipcode"`
+	FullAddress     string     `json:"full_address"`
+	CoverImage      string     `json:"cover_image"`
+	Logo            string     `json:"logo"`
+	MapsUrl         string     `json:"maps_url"`
+	GalleryImages   []string   `json:"gallery_images"`
+	InstitutionType string     `json:"institution_type"`
+	CampusSetting   string     `json:"campus_setting"`
+	ContactEmail    string     `json:"contact_email"`
+	ContactPhone    string     `json:"contact_phone"`
+	Website         string     `json:"website"`
+	FoundedYear     int32      `json:"founded_year"`
+	CampusSize      string     `json:"campus_size"`
+	IsPopular       bool       `json:"is_popular"`
+	IsFeatured      bool       `json:"is_featured"`
+	SeoTitle        string     `json:"seo_title"`
+	SeoDescription  string     `json:"seo_description"`
+	Status          string     `json:"status" example:"published"`
 	PublishedAt     *time.Time `json:"published_at" swaggertype:"string" example:"2026-07-30T12:00:00Z"`
-	CreatedAt       string   `json:"created_at"`
-	UpdatedAt       string   `json:"updated_at"`
+	CreatedAt       string     `json:"created_at"`
+	UpdatedAt       string     `json:"updated_at"`
 }
 
 type UpdateCollegeRequest struct {
@@ -98,9 +98,9 @@ type UpdateCollegeRequest struct {
 	Zipcode      *string `json:"zipcode"       validate:"omitempty,max=20"`
 	FullAddress  *string `json:"full_address"  validate:"omitempty,max=500"`
 
-	CoverImage *string   `json:"cover_image"    validate:"omitempty,url"`
-	Logo       *string   `json:"logo"           validate:"omitempty,url"`
-	MapsUrl    *string   `json:"maps_url"       validate:"omitempty,url,max=500"`
+	CoverImage    *string   `json:"cover_image"    validate:"omitempty,url"`
+	Logo          *string   `json:"logo"           validate:"omitempty,url"`
+	MapsUrl       *string   `json:"maps_url"       validate:"omitempty,url,max=500"`
 	GalleryImages *[]string `json:"gallery_images" validate:"omitempty,dive,url"`
 
 	InstitutionType *string `json:"institution_type" validate:"omitempty,max=50"`
@@ -110,10 +110,10 @@ type UpdateCollegeRequest struct {
 	ContactPhone *string `json:"contact_phone" validate:"omitempty,max=50"`
 	Website      *string `json:"website"       validate:"omitempty,url,max=500"`
 
-	FoundedYear *int32  `json:"founded_year" validate:"omitempty,gte=1000,lte=2100"`
-	CampusSize  *string `json:"campus_size"  validate:"omitempty,max=100"`
-	IsPopular   *bool   `json:"is_popular"`
-	IsFeatured  *bool   `json:"is_featured"`
+	FoundedYear  *int32  `json:"founded_year" validate:"omitempty,gte=1000,lte=2100"`
+	CampusSize   *string `json:"campus_size"  validate:"omitempty,max=100"`
+	IsPopular    *bool   `json:"is_popular"`
+	IsFeatured   *bool   `json:"is_featured"`
 	UniversityID *string `json:"university_id" validate:"omitempty,uuid"`
 
 	SeoTitle       *string `json:"seo_title"       validate:"omitempty,max=70"`
@@ -127,30 +127,34 @@ type UpdateCollegeRequest struct {
 }
 
 type CollegeListItem struct {
-	ID                string `json:"id"`
-	Name              string `json:"name"`
-	Slug              string `json:"slug"`
-	UniversityID      string `json:"university_id"`
-	Country           string `json:"country"`
-	Continent         string `json:"continent"`
-	State             string `json:"state"`
-	City              string `json:"city"`
-	Logo              string `json:"logo"`
-	CoverImage        string `json:"cover_image"`
-	InstitutionType   string `json:"institution_type"`
-	CampusSetting     string `json:"campus_setting"`
-	IsPopular         bool   `json:"is_popular"`
-	IsFeatured        bool   `json:"is_featured"`
-	IsFavorited       bool   `json:"is_favorited"`
-	HasRepresentative bool   `json:"has_representative"`
+	ID                string     `json:"id"`
+	Name              string     `json:"name"`
+	Slug              string     `json:"slug"`
+	UniversityID      string     `json:"university_id"`
+	Country           string     `json:"country"`
+	Continent         string     `json:"continent"`
+	State             string     `json:"state"`
+	City              string     `json:"city"`
+	Logo              string     `json:"logo"`
+	CoverImage        string     `json:"cover_image"`
+	InstitutionType   string     `json:"institution_type"`
+	CampusSetting     string     `json:"campus_setting"`
+	IsPopular         bool       `json:"is_popular"`
+	IsFeatured        bool       `json:"is_featured"`
+	IsFavorited       bool       `json:"is_favorited"`
+	HasRepresentative bool       `json:"has_representative"`
+	Status            string     `json:"status"`
+	PublishedAt       *time.Time `json:"published_at"`
+	CreatedAt         string     `json:"created_at"`
+	UpdatedAt         string     `json:"updated_at"`
 }
 
 type CollegeDetailResponse struct {
 	CreateCollegeResponse
-	DegreeLevels       []CollegeDegreeLevelResponse `json:"degree_levels"`
-	Majors             []CollegeMajorResponse       `json:"majors"`
-	StudyFormats       []CollegeStudyFormatResponse `json:"study_formats"`
-	HasRepresentative  bool                         `json:"has_representative"`
+	DegreeLevels      []CollegeDegreeLevelResponse `json:"degree_levels"`
+	Majors            []CollegeMajorResponse       `json:"majors"`
+	StudyFormats      []CollegeStudyFormatResponse `json:"study_formats"`
+	HasRepresentative bool                         `json:"has_representative"`
 }
 
 // Lookup response types — mirror the shape of the rows in the corresponding
@@ -211,7 +215,7 @@ type CollegeRowError struct {
 // whole upload; nothing was inserted); it is also echoed (empty) on a clean
 // 200 so the shape stays stable for the admin client.
 type CollegeBulkUploadResponse struct {
-	Created         int                `json:"created" example:"123"`
-	SkippedExisting int                `json:"skipped_existing" example:"877"`
-	Errors          []CollegeRowError  `json:"errors"`
+	Created         int               `json:"created" example:"123"`
+	SkippedExisting int               `json:"skipped_existing" example:"877"`
+	Errors          []CollegeRowError `json:"errors"`
 }

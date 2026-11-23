@@ -136,6 +136,10 @@ func toCollegeListItem(c sqlc.College) CollegeListItem {
 		CampusSetting:   deref(c.CampusSetting),
 		IsPopular:       c.IsPopular,
 		IsFeatured:      c.IsFeatured,
+		Status:          c.Status,
+		PublishedAt:     publishedAtPtr(c.PublishedAt),
+		CreatedAt:       c.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:       c.UpdatedAt.UTC().Format(time.RFC3339),
 	}
 }
 
@@ -150,11 +154,11 @@ func toCollegeSearchResult(r sqlc.SearchCollegesRow) CollegeSearchResult {
 			Slug: ptrOrEmpty(r.UniversitySlug),
 			Logo: r.UniversityLogo,
 		},
-		Country: r.Country,
+		Country:   r.Country,
 		Continent: r.Continent,
-		State:   r.State,
-		City:    r.City,
-		Logo:    r.Logo,
+		State:     r.State,
+		City:      r.City,
+		Logo:      r.Logo,
 	}
 }
 
