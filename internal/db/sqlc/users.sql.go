@@ -7,9 +7,41 @@ package sqlc
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const countAdmins = `-- name: CountAdmins :one
+SELECT COUNT(*) FROM users WHERE role = 'admin'
+`
+
+// How many admins exist. Used to refuse the removal of the last one.
+func (q *Queries) CountAdmins(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countAdmins)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countUsers = `-- name: CountUsers :one
+SELECT COUNT(*) FROM users
+WHERE ($1::text = '' OR role = $1)
+  AND ($2::text = '' OR full_name ILIKE '%' || $2 || '%' OR email ILIKE '%' || $2 || '%')
+`
+
+type CountUsersParams struct {
+	Column1 string
+	Column2 string
+}
+
+// Counts the users the admin list would show, honouring the same filters.
+func (q *Queries) CountUsers(ctx context.Context, arg CountUsersParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countUsers, arg.Column1, arg.Column2)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
 
 const createCollegeRepresentativeUser = `-- name: CreateCollegeRepresentativeUser :one
 INSERT INTO users (full_name, email, password, role, representative_college_id, email_verified)
@@ -169,6 +201,73 @@ func (q *Queries) CreateUserWithOAuth(ctx context.Context, arg CreateUserWithOAu
 	return i, err
 }
 
+const deleteUser = `-- name: DeleteUser :exec
+DELETE FROM users WHERE id = $1
+`
+
+// Removes the user. The rows that reference them are removed with them:
+// refresh_tokens, favorites and the claims they created all cascade.
+func (q *Queries) DeleteUser(ctx context.Context, id string) error {
+	_, err := q.db.Exec(ctx, deleteUser, id)
+	return err
+}
+
+const getAdminUserByID = `-- name: GetAdminUserByID :one
+SELECT
+    u.id, u.full_name, u.avatar, u.email, u.password, u.oauth_provider, u.oauth_id,
+    u.email_verified, u.created_at, u.updated_at, u.role,
+    u.representative_university_id, u.representative_college_id,
+    uni.name AS representative_university_name,
+    col.name AS representative_college_name
+FROM users u
+LEFT JOIN universities uni ON uni.id = u.representative_university_id
+LEFT JOIN colleges col ON col.id = u.representative_college_id
+WHERE u.id = $1
+`
+
+type GetAdminUserByIDRow struct {
+	ID                           string
+	FullName                     string
+	Avatar                       *string
+	Email                        string
+	Password                     *string
+	Provider                     *string
+	ProviderID                   *string
+	EmailVerified                bool
+	CreatedAt                    time.Time
+	UpdatedAt                    time.Time
+	Role                         string
+	RepresentativeUniversityID   pgtype.UUID
+	RepresentativeCollegeID      pgtype.UUID
+	RepresentativeUniversityName *string
+	RepresentativeCollegeName    *string
+}
+
+// One user for the admin detail endpoint, with the name of the institution
+// a representative is bound to. Same shape as the list row.
+func (q *Queries) GetAdminUserByID(ctx context.Context, id string) (GetAdminUserByIDRow, error) {
+	row := q.db.QueryRow(ctx, getAdminUserByID, id)
+	var i GetAdminUserByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.FullName,
+		&i.Avatar,
+		&i.Email,
+		&i.Password,
+		&i.Provider,
+		&i.ProviderID,
+		&i.EmailVerified,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Role,
+		&i.RepresentativeUniversityID,
+		&i.RepresentativeCollegeID,
+		&i.RepresentativeUniversityName,
+		&i.RepresentativeCollegeName,
+	)
+	return i, err
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
 SELECT id, full_name, avatar, email, password, oauth_provider, oauth_id, email_verified, created_at, updated_at, role, representative_university_id, representative_college_id FROM users
 WHERE email = $1
@@ -248,6 +347,193 @@ func (q *Queries) GetUserByProvider(ctx context.Context, arg GetUserByProviderPa
 		&i.Role,
 		&i.RepresentativeUniversityID,
 		&i.RepresentativeCollegeID,
+	)
+	return i, err
+}
+
+const invalidateUnusedPasswordResetTokens = `-- name: InvalidateUnusedPasswordResetTokens :exec
+UPDATE password_reset_tokens
+SET used_at = now()
+WHERE user_id = $1 AND used_at IS NULL
+`
+
+// Burns every unused reset token for a user so that only the newest link
+// works. An admin-triggered reset makes any earlier link useless.
+func (q *Queries) InvalidateUnusedPasswordResetTokens(ctx context.Context, userID string) error {
+	_, err := q.db.Exec(ctx, invalidateUnusedPasswordResetTokens, userID)
+	return err
+}
+
+const listUsers = `-- name: ListUsers :many
+SELECT
+    u.id, u.full_name, u.avatar, u.email, u.password, u.oauth_provider, u.oauth_id,
+    u.email_verified, u.created_at, u.updated_at, u.role,
+    u.representative_university_id, u.representative_college_id,
+    uni.name AS representative_university_name,
+    col.name AS representative_college_name
+FROM users u
+LEFT JOIN universities uni ON uni.id = u.representative_university_id
+LEFT JOIN colleges col ON col.id = u.representative_college_id
+WHERE ($1::text = '' OR u.role = $1)
+  AND ($2::text = '' OR u.full_name ILIKE '%' || $2 || '%' OR u.email ILIKE '%' || $2 || '%')
+ORDER BY u.created_at DESC
+LIMIT $3 OFFSET $4
+`
+
+type ListUsersParams struct {
+	Column1 string
+	Column2 string
+	Limit   int32
+	Offset  int32
+}
+
+type ListUsersRow struct {
+	ID                           string
+	FullName                     string
+	Avatar                       *string
+	Email                        string
+	Password                     *string
+	Provider                     *string
+	ProviderID                   *string
+	EmailVerified                bool
+	CreatedAt                    time.Time
+	UpdatedAt                    time.Time
+	Role                         string
+	RepresentativeUniversityID   pgtype.UUID
+	RepresentativeCollegeID      pgtype.UUID
+	RepresentativeUniversityName *string
+	RepresentativeCollegeName    *string
+}
+
+// The admin user list. Filters are optional strings: an empty role matches
+// every role, an empty search matches every name and email. The search is
+// matched case-insensitively so an admin can type part of an email address.
+//
+// The institution a representative is bound to is joined in by name so the
+// dashboard can say which one it is instead of showing a bare UUID. The
+// joins are LEFT because the institution may have been deleted while the
+// binding still stands — an inner join would drop that user from the list
+// entirely.
+func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]ListUsersRow, error) {
+	rows, err := q.db.Query(ctx, listUsers,
+		arg.Column1,
+		arg.Column2,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUsersRow{}
+	for rows.Next() {
+		var i ListUsersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.FullName,
+			&i.Avatar,
+			&i.Email,
+			&i.Password,
+			&i.Provider,
+			&i.ProviderID,
+			&i.EmailVerified,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Role,
+			&i.RepresentativeUniversityID,
+			&i.RepresentativeCollegeID,
+			&i.RepresentativeUniversityName,
+			&i.RepresentativeCollegeName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateUserRole = `-- name: UpdateUserRole :one
+UPDATE users u
+SET role = $2,
+    representative_university_id = NULLIF($3, '')::uuid,
+    representative_college_id = NULLIF($4, '')::uuid,
+    updated_at = now()
+WHERE u.id = $1
+RETURNING
+    u.id, u.full_name, u.avatar, u.email, u.password, u.oauth_provider, u.oauth_id,
+    u.email_verified, u.created_at, u.updated_at, u.role,
+    u.representative_university_id, u.representative_college_id,
+    (COALESCE((SELECT uni.name FROM universities uni WHERE uni.id = NULLIF($3, '')::uuid), ''))::text AS representative_university_name,
+    (COALESCE((SELECT col.name FROM colleges col WHERE col.id = NULLIF($4, '')::uuid), ''))::text AS representative_college_name
+`
+
+type UpdateUserRoleParams struct {
+	ID      string
+	Role    string
+	Column3 interface{}
+	Column4 interface{}
+}
+
+type UpdateUserRoleRow struct {
+	ID                           string
+	FullName                     string
+	Avatar                       *string
+	Email                        string
+	Password                     *string
+	Provider                     *string
+	ProviderID                   *string
+	EmailVerified                bool
+	CreatedAt                    time.Time
+	UpdatedAt                    time.Time
+	Role                         string
+	RepresentativeUniversityID   pgtype.UUID
+	RepresentativeCollegeID      pgtype.UUID
+	RepresentativeUniversityName string
+	RepresentativeCollegeName    string
+}
+
+// Changes a user's role and the institution they are bound to.
+//
+// The scope columns are cleared when the new role is not "representative",
+// because a representative is bound to exactly one university or college and
+// a stale binding would keep granting edit rights over it. The UNIQUE
+// constraints on those columns would also stop another representative from
+// ever claiming the same institution.
+//
+// The scope is given as a string. An empty string means "clear this binding",
+// and NULLIF turns that into a real NULL — a blank uuid is not a valid one
+// and the foreign key would reject it.
+//
+// The institution names are joined in for the same reason as in the list, so
+// a role change returns the same shape and the dashboard can update the row
+// in place without a second request.
+func (q *Queries) UpdateUserRole(ctx context.Context, arg UpdateUserRoleParams) (UpdateUserRoleRow, error) {
+	row := q.db.QueryRow(ctx, updateUserRole,
+		arg.ID,
+		arg.Role,
+		arg.Column3,
+		arg.Column4,
+	)
+	var i UpdateUserRoleRow
+	err := row.Scan(
+		&i.ID,
+		&i.FullName,
+		&i.Avatar,
+		&i.Email,
+		&i.Password,
+		&i.Provider,
+		&i.ProviderID,
+		&i.EmailVerified,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Role,
+		&i.RepresentativeUniversityID,
+		&i.RepresentativeCollegeID,
+		&i.RepresentativeUniversityName,
+		&i.RepresentativeCollegeName,
 	)
 	return i, err
 }

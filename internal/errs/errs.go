@@ -39,6 +39,13 @@ var (
 	ErrInvalidPasswordResetToken          = errors.New("invalid password reset token")
 	ErrPasswordResetTokenExpired          = errors.New("password reset token has expired")
 	ErrPasswordResetTokenUsed             = errors.New("password reset token has already been used")
+	ErrCannotDeleteSelf                   = errors.New("you cannot delete your own account")
+	ErrCannotRemoveLastAdmin              = errors.New("the last admin account cannot be removed")
+	ErrCannotResetOAuthOnlyPassword       = errors.New("this account signs in with Google and has no password to reset")
+	ErrInvalidRole                        = errors.New("role must be one of: admin, student, representative")
+	ErrRepresentativeScopeRequired        = errors.New("a representative must be bound to one university or one college")
+	ErrRepresentativeScopeConflict        = errors.New("that university or college already has a representative")
+	ErrResetUnavailable                   = errors.New("password reset is not available")
 )
 
 // InvalidReferencesError is returned when one or more UUIDs in a request
